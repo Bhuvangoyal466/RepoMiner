@@ -1,0 +1,189 @@
+# =============================================================================
+# MULTIMODAL ADVANCED RAG GITHUB REPOSITORY CHATBOT - REQUIREMENTS
+# =============================================================================
+# Python 3.9+ required
+#
+# Core Components:
+# 1. Streamlit: Modern web UI framework for ML/AI applications
+# 2. LangChain: RAG orchestration and document processing
+# 3. ChromaDB: Local vector database with HNSW indexing
+# 4. HuggingFace: Transformer models for embeddings
+# 5. Groq: Ultra-fast LLM inference API
+# 6. GitPython: Repository cloning and management
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# UI FRAMEWORK
+# -----------------------------------------------------------------------------
+streamlit>=1.30.0
+# Streamlit provides the chat interface, sidebar controls, and status updates
+# Version 1.30+ includes st.chat_message and st.chat_input for clean chat UX
+
+# -----------------------------------------------------------------------------
+# LANGCHAIN ECOSYSTEM (RAG Core)
+# -----------------------------------------------------------------------------
+langchain>=0.1.0
+# Core LangChain library for chains, prompts, and document processing
+# Provides abstractions for LLMs, embeddings, and vector stores
+
+langchain-core>=0.1.0
+# Contains base classes and utilities used across LangChain
+# Required for ChatPromptTemplate, MessagesPlaceholder, etc.
+
+langchain-community>=0.0.20
+# Community-contributed integrations (GenericLoader, LanguageParser)
+# Includes tree-sitter based code parsers for syntax-aware chunking
+
+langchain-chroma>=0.1.0
+# ChromaDB integration for LangChain
+# Provides Chroma class for vector store operations
+
+langchain-huggingface>=0.0.1
+# HuggingFace embeddings integration
+# Wrapper for sentence-transformers models
+
+langchain-google-genai>=1.0.0
+# Google Gemini integration for LangChain
+# Provides ChatGoogleGenerativeAI class for Gemini models
+
+langchain-openai>=0.1.0
+# OpenAI-compatible chat models, including OpenRouter endpoints
+
+langchain-groq>=0.1.0
+# Groq integration for LangChain
+# Provides ChatGroq class for ultra-fast LLM inference
+
+openai>=1.30.0
+# OpenAI Python client used by langchain-openai
+
+# -----------------------------------------------------------------------------
+# EVALUATION & ANALYSIS
+# -----------------------------------------------------------------------------
+pandas>=2.0.0
+# Data analysis and manipulation for evaluation metrics
+
+matplotlib>=3.7.0
+# Plotting library for visualization
+
+seaborn>=0.12.0
+# Statistical data visualization
+
+jupyter>=1.0.0
+# Jupyter notebook for interactive evaluation
+
+numpy>=1.24.0
+# Numerical computing for metrics calculations
+
+# -----------------------------------------------------------------------------
+# VECTOR DATABASE
+# -----------------------------------------------------------------------------
+chromadb>=0.4.22
+# Local-first vector database using SQLite + hnswlib
+# HNSW (Hierarchical Navigable Small World) for O(log n) similarity search
+# Persists embeddings to disk, no external server required
+
+# -----------------------------------------------------------------------------
+# EMBEDDINGS & NLP
+# -----------------------------------------------------------------------------
+sentence-transformers>=2.3.0
+# Required by HuggingFaceEmbeddings for all-MiniLM-L6-v2
+# Provides efficient sentence/document embedding generation
+# Includes model caching and GPU acceleration support
+
+transformers>=4.36.0
+# HuggingFace Transformers library (dependency of sentence-transformers)
+# Handles model downloads, tokenization, and inference
+
+torch>=2.1.0
+# PyTorch backend for neural network operations
+# Required by sentence-transformers and transformers
+# CPU-only version is sufficient for embeddings
+
+# -----------------------------------------------------------------------------
+# TEXT PROCESSING
+# -----------------------------------------------------------------------------
+tiktoken>=0.5.2
+# OpenAI's tokenizer (used by LangChain for token counting)
+# Ensures chunk sizes respect LLM token limits
+
+# -----------------------------------------------------------------------------
+# GIT OPERATIONS
+# -----------------------------------------------------------------------------
+GitPython>=3.1.40
+# Python library for Git repository operations
+# Used to clone repositories dynamically from GitHub URLs
+# Handles authentication, shallow clones, and error recovery
+
+# -----------------------------------------------------------------------------
+# ADDITIONAL DEPENDENCIES
+# -----------------------------------------------------------------------------
+numpy>=1.24.0
+# Numerical operations for embeddings and vector math
+# Required by ChromaDB for vector storage
+
+pydantic>=2.5.0
+# Data validation for LangChain and configuration
+# Ensures type safety across the application
+
+requests>=2.31.0
+# HTTP library for API calls (Groq, HuggingFace model downloads)
+
+python-dotenv>=1.0.1
+# Loads local .env files for streamlined local configuration
+
+typing-extensions>=4.9.0
+# Backport of new typing features for older Python versions
+
+# -----------------------------------------------------------------------------
+# OPTIONAL: FOR FUTURE MULTIMODAL VISION SUPPORT
+# -----------------------------------------------------------------------------
+# Uncomment these when implementing actual vision AI integration:
+#
+# openai>=1.10.0
+# # For GPT-4 Vision API to analyze images/diagrams
+#
+# pillow>=10.2.0
+# # Image processing and manipulation
+#
+# pytesseract>=0.3.10
+# # OCR for extracting text from code screenshots
+
+# =============================================================================
+# INSTALLATION INSTRUCTIONS
+# =============================================================================
+# 
+# 1. Create virtual environment:
+#    python -m venv venv
+#    
+# 2. Activate environment:
+#    Windows: venv\Scripts\activate
+#    Mac/Linux: source venv/bin/activate
+#    
+# 3. Install dependencies:
+#    pip install -r requirements.txt
+#    
+# 4. Set environment variable:
+#    export GROQ_API_KEY="your_api_key_here"
+#    
+# 5. Run the application:
+#    streamlit run app.py
+#
+# =============================================================================
+# TROUBLESHOOTING
+# =============================================================================
+#
+# Issue: "TOKENIZERS_PARALLELISM warnings"
+# Fix: Already handled in app.py with os.environ["TOKENIZERS_PARALLELISM"]="false"
+#
+# Issue: ChromaDB SQLite errors on Windows
+# Fix: Upgrade to chromadb>=0.4.22 which includes Windows compatibility fixes
+#
+# Issue: Slow embedding generation
+# Fix: Sentence-transformers will auto-detect GPU. For CPU-only, embeddings
+#      take ~2-3 seconds for 100 chunks (acceptable for most repos)
+#
+# Issue: Groq rate limits
+# Fix: Free tier is 30 requests/min. For production, upgrade to paid tier
+#      or add rate limiting logic with time.sleep()
+#
+# =============================================================================

@@ -1,0 +1,10 @@
+[server]
+fileWatcherType = "none"
+headless = true
+
+[runner]
+fastReruns = true
+magicEnabled = false
+
+[global]
+disableWatchdogWarning = true
