@@ -1,8 +1,8 @@
-# RepoMiner — Project Info
+# CodeMiner — Project Info
 
 ## Overview
 
-RepoMiner is an advanced Retrieval-Augmented Generation (RAG) Streamlit app for exploring GitHub repositories. It ingests a repo, creates semantic embeddings, stores them in a local ChromaDB vector store, and provides a chat UI that answers user questions with source-backed code snippets.
+CodeMiner is an advanced Retrieval-Augmented Generation (RAG) Streamlit app for exploring GitHub repositories. It ingests a repo, creates semantic embeddings, stores them in a local ChromaDB vector store, and provides a chat UI that answers user questions with source-backed code snippets.
 
 
 
@@ -27,7 +27,7 @@ RepoMiner is an advanced Retrieval-Augmented Generation (RAG) Streamlit app for 
 - `pages/1_📊_Repository_Stats.py`: Repository analytics, exports, and lightweight scans.
 - `pages/2_📚_How_to_Use.py`: User guide and troubleshooting.
 - `chroma_db/`: Local ChromaDB persistence (embeddings + metadata/index files).
-- `.repominer_state/`: Local session JSON and vectorstore snapshot storage.
+- `.codeminer_state/`: Local session JSON and vectorstore snapshot storage.
 - `cloned_repo/`: Temporary local clone of the target GitHub repository.
 
 ### Complete Workflow After GitHub URL Is Sent

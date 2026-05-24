@@ -20,6 +20,15 @@ streamlit>=1.30.0
 # Version 1.30+ includes st.chat_message and st.chat_input for clean chat UX
 
 # -----------------------------------------------------------------------------
+# BACKEND API
+# -----------------------------------------------------------------------------
+fastapi>=0.110.0
+# FastAPI powers the optional HTTP adapter used by the React frontend
+
+uvicorn[standard]>=0.29.0
+# ASGI server used to run backend_api.py via uvicorn or python backend_api.py
+
+# -----------------------------------------------------------------------------
 # LANGCHAIN ECOSYSTEM (RAG Core)
 # -----------------------------------------------------------------------------
 langchain>=0.1.0

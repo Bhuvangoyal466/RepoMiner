@@ -1,4 +1,4 @@
-# 🤖 RepoMiner - RAG GitHub Repository Chatbot
+# 🤖 CodeMiner - RAG GitHub Repository Chatbot
 
 An intelligent code analysis chatbot that uses **Retrieval-Augmented Generation (RAG)** to answer questions about any GitHub repository. Built with Python, Streamlit, LangChain, ChromaDB, and Google Gemini AI.
 
@@ -33,9 +33,15 @@ An intelligent code analysis chatbot that uses **Retrieval-Augmented Generation 
 - **Images**: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`
 
 ### Session Management
-- Each analyzed repo is stored locally in `.repominer_state/`
+- Each analyzed repo is stored locally in `.codeminer_state/`
 - The app restores the last active repository automatically on launch
 - Use the chatbot sidebar to switch between previously analyzed repositories
+
+### Authentication and User Scope
+- GitHub OAuth is supported for primary sign-in
+- Email/password login is available as the fallback path if OAuth fails or is unavailable
+- Signing in is required before processing repositories or opening analysis sessions
+- Sessions and tracked GitHub repositories are scoped to the signed-in user
 
 ---
 
@@ -51,13 +57,15 @@ An intelligent code analysis chatbot that uses **Retrieval-Augmented Generation 
 
 #### 1. Clone the Repository
 ```bash
-git clone https://github.com/yourusername/repominer.git
-cd repominer
+git clone https://github.com/yourusername/codeminer.git
+cd codeminer
 ```
 
 #### 2. Install Dependencies
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
 **Expected time:** 3-5 minutes
@@ -69,7 +77,16 @@ Create a `.env` file in the root directory and add your API keys:
 GEMINI_API_KEY=your_gemini_api_key_here
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 GROQ_API_KEY=your_groq_api_key_here
+
+# Auth
+CODEMINER_SESSION_SECRET=change_me_to_a_long_random_secret
+GITHUB_CLIENT_ID=your_github_oauth_client_id
+GITHUB_CLIENT_SECRET=your_github_oauth_client_secret
+GITHUB_OAUTH_REDIRECT_URI=http://127.0.0.1:5173/api/auth/github/callback
+FRONTEND_URL=http://127.0.0.1:5173/
 ```
+
+Register the callback URL above in your GitHub OAuth app before testing GitHub sign-in.
 
 **Get your free keys:**
 1. Visit https://aistudio.google.com/apikey and create a Gemini key
@@ -146,7 +163,7 @@ Return Answer with Code References
 ## 📁 Project Structure
 
 ```
-repominer/
+codeminer/
 │
 ├── app.py                          # Main Streamlit application entry point
 ├── config.py                       # Configuration and environment setup
@@ -166,7 +183,7 @@ repominer/
 ├── .gitignore                      # Git ignore rules
 │
 ├── .streamlit/                     # Streamlit configuration (auto-generated)
-├── .repominer_state/               # Session storage (auto-generated)
+├── .codeminer_state/               # Session storage (auto-generated)
 └── __pycache__/                    # Python cache (auto-generated)
 ```
 
@@ -356,8 +373,8 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/repominer.git
-cd repominer
+git clone https://github.com/yourusername/codeminer.git
+cd codeminer
 
 # Create virtual environment
 python -m venv venv

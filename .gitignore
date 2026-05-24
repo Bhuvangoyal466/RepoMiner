@@ -42,8 +42,13 @@ env/
 cloned_repo/
 chroma_db/
 scan_cache/
-.repominer_state/
+.codeminer_state/
 .rabbitai_state/
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
 
 # Environment variables
 .env

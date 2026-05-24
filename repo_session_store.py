@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import streamlit as st
 
-STATE_DIR = Path(".repominer_state")
+STATE_DIR = Path(".codeminer_state")
 SESSIONS_DIR = STATE_DIR / "sessions"
 VECTORSTORE_DIR = STATE_DIR / "vectorstores"
 INDEX_FILE = STATE_DIR / "index.json"
@@ -56,12 +56,14 @@ def save_index(index: Dict[str, Any]) -> None:
     INDEX_FILE.write_text(json.dumps(index, indent=2), encoding="utf-8")
 
 
-def list_sessions() -> List[Dict[str, Any]]:
+def list_sessions(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     index = load_index()
     sessions = index.get("sessions", [])
     if not isinstance(sessions, list):
         return []
-    return sessions
+    if user_id is None:
+        return sessions
+    return [session for session in sessions if session.get("user_id") == user_id]
 
 
 def save_session(
@@ -70,6 +72,7 @@ def save_session(
     repo_stats: Dict[str, Any],
     messages: List[Dict[str, str]],
     chat_history: List[Dict[str, str]],
+    user_id: Optional[str] = None,
     session_id: Optional[str] = None,
 ) -> str:
     _ensure_dirs()
@@ -77,6 +80,7 @@ def save_session(
     resolved_session_id = session_id or _slugify_repo(repo_name or repo_url)
     payload = {
         "session_id": resolved_session_id,
+        "user_id": user_id,
         "repo_name": repo_name,
         "repo_url": repo_url,
         "repo_stats": repo_stats,
@@ -102,6 +106,7 @@ def save_session(
         0,
         {
             "session_id": resolved_session_id,
+            "user_id": user_id,
             "repo_name": repo_name,
             "repo_url": repo_url,
             "updated_at": payload["updated_at"],
@@ -141,19 +146,54 @@ def restore_vectorstore_snapshot(
     return True
 
 
-def load_session(session_id: str) -> Optional[Dict[str, Any]]:
+def load_session(session_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     path = _session_path(session_id)
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if user_id is not None and payload.get("user_id") not in {None, user_id}:
+            return None
+        return payload
     except Exception:
         return None
 
 
-def delete_session(session_id: str) -> None:
+def list_tracked_repositories(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    sessions = list_sessions(user_id=user_id)
+    repos: Dict[str, Dict[str, Any]] = {}
+    for session in sessions:
+        repo_key = session.get("repo_url") or session.get("repo_name") or session.get("session_id")
+        if not repo_key:
+            continue
+        current = repos.get(repo_key)
+        candidate = {
+            "repoUrl": session.get("repo_url"),
+            "repoName": session.get("repo_name"),
+            "lastUpdatedAt": session.get("updated_at"),
+            "sessionCount": 1,
+        }
+        if current:
+            current["sessionCount"] = int(current.get("sessionCount", 1)) + 1
+            if candidate.get("lastUpdatedAt") and candidate.get("lastUpdatedAt") > current.get("lastUpdatedAt", ""):
+                current["lastUpdatedAt"] = candidate["lastUpdatedAt"]
+            if candidate.get("repoName") and not current.get("repoName"):
+                current["repoName"] = candidate["repoName"]
+        else:
+            repos[repo_key] = candidate
+    return sorted(repos.values(), key=lambda repo: repo.get("lastUpdatedAt") or "", reverse=True)
+
+
+def delete_session(session_id: str, user_id: Optional[str] = None) -> None:
     path = _session_path(session_id)
     if path.exists():
+        if user_id is not None:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if payload.get("user_id") not in {None, user_id}:
+                    return
+            except Exception:
+                return
         path.unlink()
 
     index = load_index()

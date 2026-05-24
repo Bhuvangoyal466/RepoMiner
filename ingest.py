@@ -16,7 +16,7 @@ KEY TECHNICAL DECISIONS:
 - ChromaDB: Uses HNSW indexing for fast approximate nearest-neighbor search
 - Metadata tracking: Stores file paths, languages, chunk IDs for traceability
 
-Author: RepoMiner
+Author: CodeMiner
 Date: March 2026
 """
 
@@ -33,7 +33,7 @@ from langchain_community.document_loaders.parsers import LanguageParser
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 # ==============================================================================
 # CONFIGURATION
@@ -55,6 +55,9 @@ CODE_EXTENSIONS = {
     ".ts": Language.TS,
     ".tsx": Language.TS,
     ".py": Language.PYTHON,
+    ".css": Language.CSS,
+    ".html": Language.HTML,
+    ".htm": Language.HTML,
     ".md": None,  # Markdown uses fallback splitter
     ".txt": None,
 }
@@ -214,9 +217,10 @@ def get_repo_stats(documents: List[Document], images_processed: int) -> Dict:
         ".ts": "TypeScript",
         ".tsx": "React+TS",
         ".py": "Python",
-        ".md": "Markdown",
         ".css": "CSS",
         ".html": "HTML",
+        ".htm": "HTML",
+        ".md": "Markdown",
     }
 
     # Build a structured languages dict mapping human-readable name -> count
