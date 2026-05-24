@@ -12,16 +12,6 @@ An intelligent code analysis chatbot that uses **Retrieval-Augmented Generation 
 
 ## 📖 Table of Contents
 
-- [Features](#-features)
-- [Quick Start](#-quick-start)
-- [How It Works](#-how-it-works)
-- [Project Structure](#-project-structure)
-- [Tech Stack](#-tech-stack)
-- [Usage Guide](#-usage-guide)
-- [Configuration](#-configuration)
-- [Troubleshooting](#-troubleshooting)
-- [Contributing](#-contributing)
-- [License](#-license)
 
 ---
 
@@ -39,7 +29,6 @@ An intelligent code analysis chatbot that uses **Retrieval-Augmented Generation 
 - **🎨 Modern UI**: Clean Streamlit interface with real-time status updates
 
 ### Supported File Types
-- **Code**: `.js`, `.jsx`, `.ts`, `.tsx`, `.py`
 - **Documentation**: `.md`, `.txt`
 - **Images**: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`
 
@@ -52,7 +41,6 @@ An intelligent code analysis chatbot that uses **Retrieval-Augmented Generation 
 
 ## 🚀 Quick Start
 
-### Prerequisites
 - **Python 3.9+** installed
 - **Git** installed  
 - **Google Gemini API Key** (free - https://aistudio.google.com/apikey)

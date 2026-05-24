@@ -16,34 +16,44 @@ import json
 from git import Repo
 from ui import (
     apply_base_ui,
+    render_sidebar_brand,
+    render_hero,
     render_info_card,
     render_metric_card,
     section_header,
     render_pill_row,
+    render_empty_state,
 )
 
 # Page Configuration
-st.set_page_config(page_title="Repository Stats", page_icon="📊", layout="wide")
+st.set_page_config(
+    page_title="CodeMiner Repository Stats", page_icon="📊", layout="wide"
+)
 
 apply_base_ui()
+render_sidebar_brand("CodeMiner", "Repository intelligence workspace")
+
+render_hero(
+    "Repository Stats",
+    "CodeMiner analytics",
+    "A compact view of the processed repository with metrics, stacks, exports, and deeper signals.",
+)
 
 section_header(
     "Analytics",
     "Repository Statistics",
-    "A clean overview of the processed repository and the data powering retrieval.",
+    "The data behind retrieval, presented as a quick scan instead of a report.",
 )
 
 # Check if repository has been processed
 if not st.session_state.get("repo_processed", False):
-    st.warning("No repository has been processed yet.")
-    st.info("Please go to the Chatbot page and process a repository first.")
-
-    # Show helpful image or instructions
-    render_info_card(
-        "How to get started",
-        "Navigate to the Chatbot page, enter a GitHub repository URL, process the repository, then return here for analytics.",
+    render_empty_state(
+        "No repository processed yet",
+        "Process a GitHub repository in Chatbot first. The stats view unlocks after ingestion completes.",
         accent="Setup",
     )
+    if st.button("Open Chatbot", use_container_width=True):
+        st.switch_page("pages/3_💬_Chatbot.py")
 
 elif st.session_state.get("repo_stats"):
     stats = st.session_state.repo_stats
@@ -99,17 +109,7 @@ elif st.session_state.get("repo_stats"):
 
     if languages:
 
-        render_pill_row(languages[:8])
-
-        # Display in columns for better organization
-        cols_per_row = 4
-        for i in range(0, len(languages), cols_per_row):
-            cols = st.columns(cols_per_row)
-            for j, lang in enumerate(languages[i : i + cols_per_row]):
-                with cols[j]:
-                    render_info_card(
-                        lang, "Detected in the repository", accent="Language"
-                    )
+        render_pill_row(languages[:10])
 
         # Also display as expandable text for copy-paste
         with st.expander("📋 View as Text (Click to Copy)"):
@@ -118,7 +118,11 @@ elif st.session_state.get("repo_stats"):
             except Exception:
                 st.code(str(languages), language=None)
     else:
-        st.info("No technology stack information available")
+        render_empty_state(
+            "No technology stack information available",
+            "The current repository stats payload did not include language metadata.",
+            accent="Stack",
+        )
 
     section_header("Export", "Download stats", "Save the analytics for offline review.")
     try:
@@ -165,42 +169,44 @@ elif st.session_state.get("repo_stats"):
     section_header(
         "Details",
         "Additional information",
-        "Technical settings and repository metadata.",
+        "Repository metadata and processing settings in a compact format.",
     )
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("##### Repository details")
+        repo_body = []
         if "repo_url" in stats:
-            st.write(f"**URL:** [{stats['repo_url']}]({stats['repo_url']})")
-
+            repo_body.append(f"URL: {stats['repo_url']}")
         if "repo_name" in stats:
-            st.write(f"**Name:** `{stats['repo_name']}`")
-
+            repo_body.append(f"Name: {stats['repo_name']}")
         if os.path.exists("./chroma_db"):
-            st.write("**Vector DB:** ChromaDB (Local)")
-            st.write("**Status:** Active")
+            repo_body.append("Vector DB: ChromaDB (Local)")
+            repo_body.append("Status: Active")
+        render_info_card(
+            "Repository details",
+            "\n".join(repo_body) if repo_body else "No repository metadata available.",
+            accent="Metadata",
+        )
 
     with col2:
-        st.markdown("##### Processing details")
-        st.write(f"**Embedding Model:** all-MiniLM-L6-v2")
-        st.write(f"**Embedding Dimensions:** 384")
-        st.write(f"**Retrieval Strategy:** Similarity Search (k=6)")
-        st.write(f"**LLM:** OpenRouter -> Gemini -> Groq")
+        render_info_card(
+            "Processing details",
+            "Embedding model: all-MiniLM-L6-v2\nEmbedding dimensions: 384\nRetrieval strategy: Similarity Search (k=6)\nLLM order: OpenRouter -> Gemini -> Groq",
+            accent="Pipeline",
+        )
 
     st.markdown("---")
 
     section_header(
         "Visuals",
         "Visual breakdown",
-        "Lightweight charts that show file distribution and repository structure.",
+        "Charts that show the repository shape without extra noise.",
     )
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("##### File distribution")
         ext_break = stats.get("extension_breakdown", {}) or {}
         if ext_break:
             try:
@@ -214,11 +220,13 @@ elif st.session_state.get("repo_stats"):
             except Exception:
                 st.write(ext_break)
         else:
-            st.info("No file type data available yet.")
+            render_empty_state(
+                "No file type data available",
+                "This repository stats payload does not include an extension breakdown.",
+                accent="Files",
+            )
 
     with col2:
-        st.markdown("##### Processing summary")
-        st.markdown("##### Language breakdown")
         lang_break = stats.get("languages", {}) or {}
         if isinstance(lang_break, dict) and lang_break:
             try:
@@ -229,9 +237,12 @@ elif st.session_state.get("repo_stats"):
             except Exception:
                 st.write(lang_break)
         else:
-            st.info("Language breakdown not available")
+            render_empty_state(
+                "Language breakdown not available",
+                "The current stats payload did not include a language count map.",
+                accent="Languages",
+            )
 
-        st.markdown("##### Top files (by size)")
         top_files = stats.get("top_files", []) or []
         if top_files:
             try:
@@ -245,15 +256,11 @@ elif st.session_state.get("repo_stats"):
             except Exception:
                 st.write(top_files)
 
-        processing_steps = {
-            "Repository Cloned": "✅",
-            "Code Analyzed": "✅",
-            "Embeddings Generated": "✅",
-            "Vector DB Stored": "✅",
-            "Ready for Chat": "✅",
-        }
-        for step, status in processing_steps.items():
-            st.write(f"{status} {step}")
+        render_info_card(
+            "Pipeline status",
+            "Repository cloned, analyzed, embedded, and stored for chat retrieval.",
+            accent="Ready",
+        )
 
     st.markdown("---")
     if st.button("🔄 Refresh Statistics", type="secondary", use_container_width=True):

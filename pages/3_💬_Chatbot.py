@@ -38,10 +38,13 @@ from repo_session_store import (
 )
 from ui import (
     apply_base_ui,
+    render_sidebar_brand,
     render_hero,
     render_info_card,
     render_pill_row,
     section_header,
+    render_sidebar_panel,
+    render_empty_state,
 )
 
 # ==============================================================================
@@ -50,13 +53,14 @@ from ui import (
 
 # Page Configuration (must be first Streamlit command)
 st.set_page_config(
-    page_title="Chatbot",
+    page_title="CodeMiner Chatbot",
     page_icon="💬",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 apply_base_ui()
+render_sidebar_brand("CodeMiner", "Repository intelligence workspace")
 
 APP_CONFIG = load_app_config()
 try:
@@ -380,16 +384,25 @@ if st.session_state.current_session_id is None:
 # SIDEBAR: Repository Processing
 # ==============================================================================
 
-st.sidebar.title("Repository Configuration")
+st.sidebar.title("Workspace")
 st.sidebar.caption(
-    "Process a repository, reload sessions, or jump to the statistics page."
+    "CodeMiner control panel for repository input, sessions, and chat settings."
 )
 st.sidebar.markdown("---")
 
-# Saved repository sessions
+render_sidebar_panel(
+    "Repository input", "Paste a public GitHub URL to process a repository."
+)
+github_url = st.sidebar.text_input(
+    "GitHub repository URL",
+    placeholder="https://github.com/username/repo",
+    help="Enter the full URL of a public GitHub repository to analyze",
+)
+
+render_sidebar_panel("Saved sessions", "Return to a previously processed repository.")
 sessions = list_sessions()
+selected_session_id = None
 if sessions:
-    st.sidebar.subheader("🕘 Saved Sessions")
     session_ids = [None] + [s["session_id"] for s in sessions if s.get("session_id")]
     session_labels = {
         s[
@@ -415,30 +428,27 @@ if sessions:
     ):
         if _load_session_by_id(selected_session_id):
             st.rerun()
+else:
+    st.sidebar.caption("No saved sessions yet.")
 
-# GitHub URL Input
-github_url = st.sidebar.text_input(
-    "GitHub Repository URL",
-    placeholder="https://github.com/username/repo",
-    help="Enter the full URL of a public GitHub repository to analyze",
+render_sidebar_panel(
+    "Processing actions", "Adjust retrieval depth and process the current repository."
 )
+k = st.sidebar.slider("Retrieved chunks (k)", min_value=1, max_value=12, value=6)
 
-# Process Button
-if st.sidebar.button("🚀 Process Repository", type="primary", use_container_width=True):
+if st.sidebar.button("Process repository", type="primary", use_container_width=True):
     if not github_url:
-        st.sidebar.error("⚠️ Please enter a GitHub URL")
+        st.sidebar.error("Please enter a GitHub URL.")
     elif not github_url.startswith("https://github.com/"):
-        st.sidebar.error("⚠️ Invalid GitHub URL format")
+        st.sidebar.error("Enter a valid public GitHub repository URL.")
     else:
-        # Persist the previous repo session before clearing the active vector store
         try:
             _save_current_session()
         except Exception:
             pass
 
-        # Clear existing ChromaDB
         if os.path.exists("./chroma_db"):
-            with st.sidebar.status("🧹 Cleaning previous data..."):
+            with st.sidebar.status("Cleaning previous data..."):
                 safe_rmtree("./chroma_db")
                 st.session_state.repo_processed = False
                 st.session_state.repo_stats = None
@@ -446,34 +456,29 @@ if st.sidebar.button("🚀 Process Repository", type="primary", use_container_wi
                 st.session_state.chat_history = []
                 st.session_state.active_model_name = f"openrouter-{OPENROUTER_MODEL}"
 
-                # Force reload of RAG pipeline
                 if "rag_bundle" in st.session_state:
                     del st.session_state["rag_bundle"]
                 st.cache_resource.clear()
 
-        # Process repository
-        with st.sidebar.status("📥 Processing repository...", expanded=True) as status:
+        with st.sidebar.status("Processing repository...", expanded=True) as status:
             try:
-                st.write("📥 Downloading files from GitHub...")
-                st.write("🔍 Analyzing code structure...")
-                st.write("📊 Generating embeddings...")
-                st.write("💾 Storing in vector database...")
+                st.write("Downloading files from GitHub...")
+                st.write("Analyzing code structure...")
+                st.write("Generating embeddings...")
+                st.write("Storing results in the vector database...")
 
                 success, stats = process_repository(github_url)
 
                 if success:
                     st.session_state.repo_processed = True
                     st.session_state.repo_stats = stats
-                    # Add repo URL to stats if not present
                     if "repo_url" not in st.session_state.repo_stats:
                         st.session_state.repo_stats["repo_url"] = github_url
                     repo_name = st.session_state.repo_stats.get("repo_name")
                     if not repo_name:
-                        # Extract repo name from URL
                         repo_name = github_url.rstrip("/").split("/")[-1]
                         st.session_state.repo_stats["repo_name"] = repo_name
 
-                    # Reset active chat for the new repo and persist the new session snapshot
                     st.session_state.messages = []
                     st.session_state.chat_history = []
                     st.session_state.current_session_id = save_session(
@@ -488,55 +493,51 @@ if st.sidebar.button("🚀 Process Repository", type="primary", use_container_wi
                     save_vectorstore_snapshot(st.session_state.current_session_id)
 
                     status.update(
-                        label="✅ Repository processed successfully!", state="complete"
+                        label="Repository processed successfully.", state="complete"
                     )
                     st.sidebar.success(f"Processed {stats['total_chunks']} code chunks")
                     st.sidebar.info(
-                        "💡 Check the Repository Stats page for detailed analytics!"
+                        "Open Repository Stats for the full analytics view."
                     )
                 else:
-                    status.update(label="❌ Processing failed", state="error")
+                    status.update(label="Processing failed.", state="error")
                     st.sidebar.error(
                         "Failed to process repository. Check console for details."
                     )
 
             except Exception as e:
                 st.sidebar.error(f"Error: {str(e)}")
-                status.update(label="❌ Error occurred", state="error")
+                status.update(label="Error occurred.", state="error")
 
-# Display Quick Stats in Sidebar
+render_sidebar_panel("Quick stats", "Current repository summary.")
 if st.session_state.repo_stats:
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("📊 Quick Stats")
     stats = st.session_state.repo_stats
+    quick_left, quick_right = st.sidebar.columns(2)
+    with quick_left:
+        st.metric("Files", stats.get("total_files", 0))
+    with quick_right:
+        st.metric("Chunks", stats.get("total_chunks", 0))
+    if st.sidebar.button("Open Repository Stats", use_container_width=True):
+        st.switch_page("pages/1_📊_Repository_Stats.py")
+else:
+    st.sidebar.caption("Process a repository to populate the quick stats panel.")
 
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
-        st.metric("📁 Files", stats.get("total_files", 0))
-    with col2:
-        st.metric("🧩 Chunks", stats.get("total_chunks", 0))
-
-    st.sidebar.info("📊 View detailed stats in the **Repository Stats** page!")
-
-# Navigation Tips
-st.sidebar.markdown("---")
+render_sidebar_panel(
+    "Helpful tips", "Ask short, code-focused questions for the best results."
+)
 st.sidebar.markdown("""
-### 💡 Quick Tips
-- 📚 New here? Check the **How to Use** page
-- 📊 View detailed stats in **Repository Stats**
-- 💬 Ask questions about code structure, logic, and more!
+- Ask about a file, function, or flow.
+- Reopen a saved session when you want to continue.
+- Use Repository Stats for exports and charts.
 
-### 🎯 Example Questions
-- "What is the overall architecture?"
-- "How does authentication work?"
-- "Explain the API endpoints"
-- "What state management is used?"
+Example prompts:
+- What does the authentication flow do?
+- Which files define the API routes?
+- How is repository state stored?
 """)
 
-# Clear Chat Button
 if st.session_state.repo_processed and st.session_state.messages:
-    st.sidebar.markdown("---")
-    if st.sidebar.button("🗑️ Clear Chat History", use_container_width=True):
+    if st.sidebar.button("Clear chat history", use_container_width=True):
         st.session_state.messages = []
         st.session_state.chat_history = []
         try:
@@ -551,9 +552,9 @@ if st.session_state.repo_processed and st.session_state.messages:
 # ==============================================================================
 
 render_hero(
-    "Chat",
-    "GitHub Repository Chatbot",
-    "Ask questions about the codebase using natural language. Answers are grounded in retrieved repository context and presented in a clean, focused interface.",
+    "Repository Q&A",
+    "CodeMiner Chatbot",
+    "Ask grounded questions about a processed repository. Keep queries specific to files, functions, or system behavior.",
 )
 render_pill_row(
     ["OpenRouter GPT", "Gemini", "Groq", "ChromaDB", "Source-backed answers"]
@@ -561,27 +562,11 @@ render_pill_row(
 
 # Check if repository has been processed
 if not st.session_state.repo_processed:
-    st.info("Start by processing a GitHub repository using the sidebar.")
-
-    # Helpful information for new users
-    col1, col2 = st.columns(2)
-
-    with col1:
-        render_info_card(
-            "Getting started",
-            "Enter a GitHub URL in the sidebar, click Process Repository, wait for ingestion, then start asking questions.",
-            accent="Flow",
-        )
-
-    with col2:
-        render_info_card(
-            "How it works",
-            "Your question is embedded, ChromaDB retrieves similar code, and the model answers using that context.",
-            accent="RAG",
-        )
-
-    st.markdown("---")
-    st.info("First time here? Visit the How to Use page for a complete guide.")
+    render_empty_state(
+        "No repository loaded",
+        "Paste a GitHub URL in the sidebar, process it, and then ask grounded questions here.",
+        accent="Start here",
+    )
 
 else:
     # Repository is processed - show chat interface
@@ -590,16 +575,11 @@ else:
     if st.session_state.repo_stats and "repo_name" in st.session_state.repo_stats:
         render_info_card(
             f"Currently analyzing: {st.session_state.repo_stats['repo_name']}",
-            "Use the slider to control retrieval depth, ask follow-up questions, or inspect source chunks in the expander below.",
+            "Ask follow-up questions, then inspect retrieved chunks below when you want source context.",
             accent="Active repo",
         )
 
         # Load RAG pipeline (cached)
-        # Add retrieval parameter control
-        k = st.sidebar.slider(
-            "Number of retrieved chunks (k)", min_value=1, max_value=12, value=6
-        )
-
         if "rag_bundle" not in st.session_state:
             with st.spinner("🔄 Loading AI models..."):
                 rag_bundle = load_rag_pipeline(
