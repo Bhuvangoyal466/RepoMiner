@@ -41,6 +41,16 @@ def _vectorstore_path(session_id: str) -> Path:
     return VECTORSTORE_DIR / session_id
 
 
+def session_vectorstore_dir(session_id: str) -> str:
+    """Return the per-session ChromaDB persist directory as a string path.
+
+    Each session has its own directory under `.codeminer_state/vectorstores/<session_id>/`.
+    Routes that read or write the vectorstore should pass this to Chroma directly
+    instead of staging through the shared `./chroma_db` directory.
+    """
+    return str(_vectorstore_path(session_id))
+
+
 def load_index() -> Dict[str, Any]:
     _ensure_dirs()
     if INDEX_FILE.exists():

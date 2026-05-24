@@ -2,9 +2,12 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
+import sys
 import time
+from datetime import datetime
 from typing import Any, Dict
 from urllib.parse import urlencode
 
@@ -13,6 +16,26 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 import uvicorn
+
+# Load .env (OPENROUTER_API_KEY, GOOGLE_API_KEY, GROQ_API_KEY, ...) before any
+# os.getenv() calls below. Without this, the chat route silently skips every
+# provider and falls back to the "configured model is needed" stub.
+from config import load_app_config
+
+_APP_CONFIG = load_app_config()
+
+logging.basicConfig(
+    level=os.getenv("CODEMINER_LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger("codeminer.backend")
+logger.info(
+    "Provider keys loaded: openrouter=%s gemini=%s groq=%s",
+    bool(_APP_CONFIG.get("OPENROUTER_API_KEY")),
+    bool(_APP_CONFIG.get("GEMINI_API_KEY")),
+    bool(_APP_CONFIG.get("GROQ_API_KEY")),
+)
 
 from auth_store import (
     find_user_by_id,
@@ -29,8 +52,7 @@ from repo_session_store import (
     load_session,
     save_session,
     delete_session,
-    save_vectorstore_snapshot,
-    restore_vectorstore_snapshot,
+    session_vectorstore_dir,
 )
 from ingest import process_repository
 import openai
@@ -374,15 +396,33 @@ def api_list_sessions(request: Request):
     return out
 
 
+def _user_scoped_session_id(user_id: str, repo_name: str, repo_url: str) -> str:
+    """Build a session_id namespaced to the user so two users analyzing the same repo
+    do not overwrite each other's session file or vectorstore snapshot."""
+    base = repo_name or (repo_url.rstrip('/').split('/')[-1] if repo_url else 'repo')
+    safe_base = ''.join(ch if ch.isalnum() or ch in '-_' else '_' for ch in base).strip('_') or 'repo'
+    user_tag = hashlib.sha256((user_id or 'anon').encode('utf-8')).hexdigest()[:8]
+    return f"u{user_tag}-{safe_base}"
+
+
 @app.post('/api/process')
 def api_process(req: ProcessRequest, request: Request):
     user = _require_user(request)
     repo = req.repoUrl
-    success, stats = process_repository(repo)
+
+    # Decide the session_id up front so we can ingest directly into the
+    # per-session vectorstore directory. Writing to a session-scoped path
+    # avoids the SQLITE_READONLY_DBMOVED race where a stale Chroma connection
+    # to ./chroma_db (held by an in-flight chat request) blocks the writer.
+    repo_name_guess = repo.rstrip('/').split('/')[-1] if repo else 'repo'
+    scoped_session_id = _user_scoped_session_id(user["id"], repo_name_guess, repo)
+    session_dir = session_vectorstore_dir(scoped_session_id)
+
+    success, stats = process_repository(repo, persist_dir=session_dir)
     if not success:
         raise HTTPException(status_code=500, detail='Processing failed')
 
-    repo_name = stats.get('repo_name') or repo.rstrip('/').split('/')[-1]
+    repo_name = stats.get('repo_name') or repo_name_guess
     session_id = save_session(
         repo_name,
         repo,
@@ -390,12 +430,9 @@ def api_process(req: ProcessRequest, request: Request):
         messages=[],
         chat_history=[],
         user_id=user["id"],
+        session_id=scoped_session_id,
     )
     set_current_session(user["id"], session_id)
-    try:
-        save_vectorstore_snapshot(session_id)
-    except Exception:
-        pass
     return {'sessionId': session_id, 'stats': stats}
 
 
@@ -445,11 +482,11 @@ def api_get_stats(session_id: str, request: Request):
 
 @app.get('/api/sessions/{session_id}/chunks')
 def api_get_chunks(session_id: str, request: Request, page: int = 1, per_page: int = 20):
-    """Return paginated chunks from the session's Chroma snapshot.
+    """Return paginated chunks from the session's per-session Chroma store.
 
-    Tries to open `./chroma_db` after restoring the session snapshot and returns
-    documents with path, content, score (score is omitted here), and inferred
-    startLine/endLine where possible.
+    Opens the session's own persist directory directly and returns documents with
+    path, content, score (omitted here), and inferred startLine/endLine where
+    possible.
     """
     user = _require_user(request)
     session_id = _resolve_session_id(session_id, user["id"])
@@ -457,12 +494,8 @@ def api_get_chunks(session_id: str, request: Request, page: int = 1, per_page: i
     if not session:
         raise HTTPException(status_code=404, detail='Session not found')
 
-    try:
-        restored = restore_vectorstore_snapshot(session_id)
-    except Exception:
-        restored = False
-
-    if not restored or HuggingFaceEmbeddings is None or Chroma is None:
+    session_dir = session_vectorstore_dir(session_id)
+    if not (os.path.exists(session_dir) and os.listdir(session_dir)) or HuggingFaceEmbeddings is None or Chroma is None:
         return {"chunks": [], "page": page, "per_page": per_page, "total": 0}
 
     try:
@@ -471,7 +504,7 @@ def api_get_chunks(session_id: str, request: Request, page: int = 1, per_page: i
             model_kwargs={"device": "cpu"},
             encode_kwargs={"normalize_embeddings": True},
         )
-        vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
+        vectorstore = Chroma(persist_directory=session_dir, embedding_function=embeddings)
 
         # Attempt to read all stored documents from the underlying collection
         docs_result = {}
@@ -546,31 +579,49 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
         raise HTTPException(status_code=404, detail='Session not found')
 
     prompt = None
+    history_payload: list = []
     if isinstance(body, dict):
         prompt = body.get('prompt')
         k = int(body.get('k', 6))
+        raw_history = body.get('history') or []
+        if isinstance(raw_history, list):
+            history_payload = raw_history
     else:
         k = 6
 
     if not prompt:
         raise HTTPException(status_code=400, detail='Missing prompt')
 
-    sources = []
-    # Try to restore vectorstore snapshot and run similarity search
-    restored = False
-    try:
-        restored = restore_vectorstore_snapshot(session_id)
-    except Exception:
-        restored = False
+    # Normalize prior turns into OpenAI-style messages. Accept either
+    # {role: "user"|"assistant"|"human"|"ai", text|content: "..."}.
+    def _normalize_history(items, max_turns: int = 12):
+        normalized = []
+        for item in items[-max_turns:]:
+            if not isinstance(item, dict):
+                continue
+            role = (item.get('role') or '').lower()
+            content = item.get('text') or item.get('content') or ''
+            if not isinstance(content, str) or not content.strip():
+                continue
+            if role in ('user', 'human'):
+                normalized.append({'role': 'user', 'content': content.strip()})
+            elif role in ('assistant', 'ai', 'bot'):
+                normalized.append({'role': 'assistant', 'content': content.strip()})
+        return normalized
 
-    if restored and HuggingFaceEmbeddings is not None and Chroma is not None:
+    history_messages = _normalize_history(history_payload)
+
+    sources = []
+    session_dir = session_vectorstore_dir(session_id)
+
+    if os.path.exists(session_dir) and os.listdir(session_dir) and HuggingFaceEmbeddings is not None and Chroma is not None:
         try:
             embeddings = HuggingFaceEmbeddings(
                 model_name="all-MiniLM-L6-v2",
                 model_kwargs={"device": "cpu"},
                 encode_kwargs={"normalize_embeddings": True},
             )
-            vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
+            vectorstore = Chroma(persist_directory=session_dir, embedding_function=embeddings)
             docs_and_scores = vectorstore.similarity_search_with_score(prompt, k=k)
             for i, (doc, score) in enumerate(docs_and_scores):
                 sources.append(
@@ -581,9 +632,8 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
                         "score": float(score),
                     }
                 )
-        except Exception as e:
-            # if retrieval fails, return empty sources but continue
-            print("Retrieval error:", e)
+        except Exception:
+            logger.exception("Retrieval error for session %s", session_id)
 
     # Try to call the configured provider with a compact retrieved context bundle.
     reply_text = None
@@ -666,80 +716,118 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
         return None
 
     def call_providers_with_fallback(messages):
+        attempts = []
+
         # 1) OpenRouter via OpenAI-compatible API
         openrouter_key = os.getenv("OPENROUTER_API_KEY")
         openrouter_base = os.getenv("OPENROUTER_BASE_URL")
-        openrouter_model = os.getenv("OPENROUTER_MODEL") or os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-20b:free")
+        openrouter_model = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-20b:free")
         if openrouter_key:
+            logger.info("Trying OpenRouter (model=%s base=%s)", openrouter_model, openrouter_base)
             try:
-                model_name = openrouter_model or "gpt-4o"
-                try:
-                    client = openai.OpenAI(api_key=openrouter_key, base_url=openrouter_base) if openrouter_base else openai.OpenAI(api_key=openrouter_key)
-                    resp = client.chat.completions.create(model=model_name, messages=messages, temperature=0.2, max_tokens=800)
-                    text = _extract_text_response(resp)
-                    if text:
-                        return text
-                except Exception:
-                    if openrouter_base:
-                        openai.api_base = openrouter_base
-                    openai.api_key = openrouter_key
-                    resp = openai.ChatCompletion.create(model=model_name, messages=messages, temperature=0.2, max_tokens=800)
-                    text = _extract_text_response(resp)
-                    if text:
-                        return text
+                client = openai.OpenAI(api_key=openrouter_key, base_url=openrouter_base) if openrouter_base else openai.OpenAI(api_key=openrouter_key)
+                resp = client.chat.completions.create(model=openrouter_model, messages=messages, temperature=0.2, max_tokens=8192)
+                text = _extract_text_response(resp)
+                if text:
+                    logger.info("OpenRouter returned %d chars", len(text))
+                    return text
+                attempts.append("openrouter: empty response")
+                logger.warning("OpenRouter returned empty response: %r", resp)
             except Exception as e:
-                print("OpenRouter call failed:", e)
+                attempts.append(f"openrouter: {e}")
+                logger.exception("OpenRouter call failed")
+        else:
+            attempts.append("openrouter: no key")
+            logger.info("Skipping OpenRouter — OPENROUTER_API_KEY not set")
 
         # 2) Groq via langchain_groq if available
         groq_key = os.getenv("GROQ_API_KEY")
-        groq_model = os.getenv("GROQ_MODEL")
+        groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
         if groq_key:
+            logger.info("Trying Groq (model=%s)", groq_model)
             try:
                 from langchain_groq import ChatGroq
 
-                groq_llm = ChatGroq(model=groq_model or "llama-3.3-70b-versatile", groq_api_key=groq_key)
+                groq_llm = ChatGroq(model=groq_model, groq_api_key=groq_key, temperature=0.2, max_tokens=8192)
                 result = groq_llm.invoke(messages) if hasattr(groq_llm, "invoke") else groq_llm(messages)
                 text = _extract_text_response(result)
                 if text:
+                    logger.info("Groq returned %d chars", len(text))
                     return text
+                attempts.append("groq: empty response")
+                logger.warning("Groq returned empty response: %r", result)
             except Exception as e:
-                print("Groq call failed:", e)
+                attempts.append(f"groq: {e}")
+                logger.exception("Groq call failed")
+        else:
+            attempts.append("groq: no key")
+            logger.info("Skipping Groq — GROQ_API_KEY not set")
 
         # 3) Gemini via langchain_google_genai if available
-        gemini_key = os.getenv("GOOGLE_API_KEY")
-        gemini_model = os.getenv("GEMINI_MODEL_PRO") or os.getenv("GEMINI_MODEL_FLASH")
+        gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        gemini_model = os.getenv("GEMINI_MODEL_PRO") or os.getenv("GEMINI_MODEL_FLASH", "gemini-2.5-pro")
         if gemini_key:
+            logger.info("Trying Gemini (model=%s)", gemini_model)
             try:
                 from langchain_google_genai import ChatGoogleGenerativeAI
 
-                gemini_llm = ChatGoogleGenerativeAI(model=gemini_model or "gemini-2.5-pro", google_api_key=gemini_key)
+                gemini_llm = ChatGoogleGenerativeAI(model=gemini_model, google_api_key=gemini_key, temperature=0.2, max_output_tokens=8192)
                 out = gemini_llm.invoke(messages) if hasattr(gemini_llm, "invoke") else gemini_llm(messages)
                 text = _extract_text_response(out)
                 if text:
+                    logger.info("Gemini returned %d chars", len(text))
                     return text
+                attempts.append("gemini: empty response")
+                logger.warning("Gemini returned empty response: %r", out)
             except Exception as e:
-                print("Gemini call failed:", e)
+                attempts.append(f"gemini: {e}")
+                logger.exception("Gemini call failed")
+        else:
+            attempts.append("gemini: no key")
+            logger.info("Skipping Gemini — GOOGLE_API_KEY/GEMINI_API_KEY not set")
 
+        logger.error("All providers failed or returned empty. Attempts: %s", attempts)
         return None
 
     try:
         qa_system_prompt = (
-            "You are CodeMiner, a precise repository assistant. Answer only from the provided context. "
-            "Be short, direct, and specific. Prefer 3 to 6 sentences. Cite file paths only when they matter and keep the response grounded in the retrieved snippets. "
-            "If the context does not support a confident answer, say what is missing instead of inventing details.\n\n"
+            "You are a friendly senior engineer chatting with a teammate about a codebase. "
+            "Use only the retrieved context below to answer.\n\n"
+            "How to respond:\n"
+            "- Reply in plain conversational English, like a chatbot. No markdown at all: "
+            "no headings, no asterisks for bold or italics, no bullet points, no tables, no "
+            "fenced code blocks. Write in natural sentences and short paragraphs.\n"
+            "- Be concise. Aim for 3 to 6 sentences. Only go longer if the question truly "
+            "needs it. Do not pad and do not restate the question.\n"
+            "- When you mention a file or function, just write its name inline in the "
+            "sentence (for example: the auth flow lives in backend_api.py). Do not wrap it "
+            "in backticks or quotes.\n"
+            "- Do not add a meta summary, do not describe the structure of your answer, do "
+            "not announce what you are about to do.\n"
+            "- If the retrieved context does not cover the question, say so in one sentence "
+            "and mention which file would most likely have the answer.\n\n"
+            "Retrieved Context:\n{context}"
         )
         context_lines = []
-        for source in sources[:4]:
+        for source in sources:
             content = source['content'].strip().replace('\r\n', '\n')
             context_lines.append(
-                f"File: {source['path']}\nScore: {source['score']:.4f}\nContent:\n{content}"
+                f"File: {source['path']}\nSimilarity: {source['score']:.4f}\nContent:\n{content}"
             )
         context_text = "\n\n---\n\n".join(context_lines) if context_lines else "No relevant context retrieved."
-        system_message = qa_system_prompt + "Retrieved context:\n" + context_text
-        messages = [{"role": "system", "content": system_message}, {"role": "user", "content": prompt}]
+        system_message = qa_system_prompt.replace("{context}", context_text)
+
+        messages = [{"role": "system", "content": system_message}]
+        messages.extend(history_messages)
+        messages.append({"role": "user", "content": prompt})
+
+        logger.info(
+            "Calling LLM provider chain (prompt_len=%d, sources=%d, history_turns=%d, context_chars=%d)",
+            len(prompt), len(sources), len(history_messages), len(context_text),
+        )
         reply_text = call_providers_with_fallback(messages)
-    except Exception as e:
-        print("Provider fallback error:", e)
+    except Exception:
+        logger.exception("Provider fallback error")
         reply_text = None
 
     # Fallback synthesized reply
@@ -747,17 +835,54 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
         if sources:
             top_paths = ", ".join([s["path"] for s in sources[:3]])
             reply_text = (
-                f"I found relevant context in {top_paths}. "
-                "A configured model is needed to generate the full grounded answer, but these files are the ones to inspect first."
+                f"I could not reach a configured LLM, so here is the raw context. "
+                f"Most relevant files: {top_paths}. "
+                "Check the backend logs for the provider chain errors."
             )
         else:
             reply_text = "I could not find relevant repository context for that question."
 
+    created_at = datetime.utcnow().isoformat()
+    user_message_id = "msg-" + secrets.token_hex(6)
+    assistant_message_id = "msg-" + secrets.token_hex(6)
+
+    # Persist this turn into the session so reopening the session in the UI
+    # restores the conversation. Stored with both `text` (React) and `content`
+    # (Streamlit) so either client can render it.
+    try:
+        prior_messages = list(session.get("messages") or [])
+        prior_messages.append({
+            "id": user_message_id,
+            "role": "user",
+            "text": prompt,
+            "content": prompt,
+            "createdAt": created_at,
+        })
+        prior_messages.append({
+            "id": assistant_message_id,
+            "role": "assistant",
+            "text": reply_text,
+            "content": reply_text,
+            "createdAt": created_at,
+            "sources": sources,
+        })
+        save_session(
+            repo_name=session.get("repo_name") or "repo",
+            repo_url=session.get("repo_url") or "",
+            repo_stats=session.get("repo_stats") or {},
+            messages=prior_messages,
+            chat_history=session.get("chat_history") or [],
+            user_id=user["id"],
+            session_id=session_id,
+        )
+    except Exception:
+        logger.exception("Failed to persist chat turn to session %s", session_id)
+
     return {
-        "id": "local-" + str(abs(hash(prompt)))[:8],
+        "id": assistant_message_id,
         "role": "assistant",
         "text": reply_text,
-        "createdAt": None,
+        "createdAt": created_at,
         "sources": sources,
     }
 

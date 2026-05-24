@@ -143,7 +143,8 @@ export default function Dashboard() {
 
       <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="glass p-4 rounded-md lg:col-span-2">
-          <h4 className="font-semibold">Hotspots & Complexity</h4>
+          <h4 className="font-semibold">Hotspots</h4>
+          <div className="text-xs text-muted mt-1">Files touched by the most commits in this repo's history.</div>
           <div className="mt-3">
             {loading ? (
               <div className="text-muted">Loading hotspots…</div>
@@ -152,7 +153,7 @@ export default function Dashboard() {
                 <thead className="text-left text-muted">
                   <tr>
                     <th>Path</th>
-                    <th>Complexity</th>
+                    <th>Commits</th>
                     <th>Lines</th>
                   </tr>
                 </thead>
@@ -160,7 +161,7 @@ export default function Dashboard() {
                   {stats.hotspots.map((hotspot: any) => (
                     <tr
                       key={hotspot.path}
-                      className="border-t border-white/6 hover:bg-white/2 cursor-pointer"
+                      className="border-t border-white/6 hover:bg-white/2"
                     >
                       <td className="py-2">{hotspot.path}</td>
                       <td>{hotspot.complexity}</td>
@@ -177,6 +178,7 @@ export default function Dashboard() {
 
         <div className="glass p-4 rounded-md">
           <h4 className="font-semibold">Contributors</h4>
+          <div className="text-xs text-muted mt-1">Commits per author from the full git history.</div>
           <div className="mt-3 text-sm">
             {loading ? (
               <div className="text-muted">Loading contributors…</div>
@@ -189,53 +191,29 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="mt-6">
         <div className="glass p-4 rounded-md">
-          <h4 className="font-semibold">Dependencies & Licenses</h4>
+          <h4 className="font-semibold">Dependencies</h4>
+          <div className="text-xs text-muted mt-1">Declared in package.json and requirements.txt.</div>
           <div className="mt-3 text-sm">
             {loading ? (
               <div className="text-muted">Loading dependencies…</div>
             ) : stats?.dependencies?.length ? (
-              <div className="space-y-2">
-                {stats.dependencies.map((dependency: any) => (
-                  <div key={dependency.name} className="flex items-center justify-between gap-4">
-                    <div>
-                      <div className="font-medium">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {stats.dependencies.map((dependency: any, i: number) => (
+                  <div key={`${dependency.source || ''}-${dependency.name}-${i}`} className="flex items-center justify-between gap-4 py-1">
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">
                         {dependency.name}
                         {dependency.version ? `@${dependency.version}` : ''}
                       </div>
-                      <div className="text-xs text-muted">{dependency.license || 'unknown'}</div>
                     </div>
-                    <div className="text-xs text-muted">{dependency.vulns ? `${dependency.vulns} vuln(s)` : ''}</div>
+                    <div className="text-xs text-muted shrink-0">{dependency.source || ''}</div>
                   </div>
                 ))}
               </div>
             ) : (
               <div className="text-muted">No dependency data</div>
-            )}
-          </div>
-        </div>
-
-        <div className="glass p-4 rounded-md">
-          <h4 className="font-semibold">Security Findings</h4>
-          <div className="mt-3 text-sm">
-            {loading ? (
-              <div className="text-muted">Loading security findings…</div>
-            ) : stats?.security_findings?.length ? (
-              <ul>
-                {stats.security_findings.map((finding: any) => (
-                  <li key={finding.id} className="py-1">
-                    <strong
-                      className={`px-2 py-1 rounded ${finding.severity === 'HIGH' ? 'bg-red-600 text-white' : 'bg-yellow-500 text-white'} text-xs`}
-                    >
-                      {finding.severity}
-                    </strong>{' '}
-                    <span className="ml-2">{finding.title}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="text-muted">No findings</div>
             )}
           </div>
         </div>

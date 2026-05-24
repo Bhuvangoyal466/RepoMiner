@@ -45,11 +45,37 @@ export default function Chat(){
               repoName: session.repo_name || session.repoName || null,
               repoUrl: session.repo_url || session.repoUrl || null,
             })
+
+            // Restore prior conversation from the session file so switching
+            // sessions does not lose the chat history.
+            const storedMessages = Array.isArray(session.messages) ? session.messages : []
+            const restored = storedMessages
+              .map((m: any, idx: number) => {
+                const role = m?.role === 'assistant' || m?.role === 'ai' ? 'assistant'
+                  : m?.role === 'user' || m?.role === 'human' ? 'user'
+                  : null
+                if (!role) return null
+                const text = (typeof m?.text === 'string' ? m.text : m?.content) || ''
+                if (!text) return null
+                return {
+                  id: m?.id || `restored-${idx}`,
+                  role,
+                  text,
+                  createdAt: m?.createdAt || m?.created_at || null,
+                  sources: Array.isArray(m?.sources) ? m.sources : undefined,
+                }
+              })
+              .filter(Boolean) as any[]
+            setMessages(restored)
           } catch {
-            if (!cancelled) setSessionMeta(null)
+            if (!cancelled) {
+              setSessionMeta(null)
+              setMessages([])
+            }
           }
         } else if (!cancelled) {
           setSessionMeta(null)
+          setMessages([])
           setToast('Ingest a repository first, then ask a grounded question here.')
         }
       } catch {
@@ -91,11 +117,14 @@ export default function Chat(){
     }
 
     const m = {id:Date.now().toString(), role:'user', text:prompt, createdAt: new Date().toISOString()}
+    const priorHistory = messages
+      .filter((msg: any) => (msg.role === 'user' || msg.role === 'assistant') && typeof msg.text === 'string' && msg.text.trim())
+      .map((msg: any) => ({ role: msg.role as 'user'|'assistant', text: msg.text }))
     setMessages(prev=>[...prev,m])
     setInput('')
     setLoading(true)
     try{
-      const res = await sendChat(sessionId, prompt)
+      const res = await sendChat(sessionId, prompt, priorHistory)
       setMessages(prev=>[...prev,{...res, createdAt: res.createdAt || new Date().toISOString()}])
     }catch(err:any){
       setToast(err?.response?.data?.detail || err?.message || 'Failed to send message')

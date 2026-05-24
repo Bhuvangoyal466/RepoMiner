@@ -27,6 +27,7 @@ from langchain.chains import create_history_aware_retriever, create_retrieval_ch
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
+import logging
 from ingest import process_repository, get_repo_stats, safe_rmtree
 from repo_session_store import (
     load_index,
@@ -175,12 +176,20 @@ def load_rag_pipeline(
     Note: underscore-prefixed parameters are excluded from caching hash.
     """
 
+    logging.basicConfig(level=logging.INFO)
+    logging.info("Initializing RAG pipeline — checking configured providers")
+
     providers = []
     vectorstore = None
 
     def _register_provider(model_name, llm):
         nonlocal vectorstore
-        chain, store = _build_rag_chain(llm)
+        logging.info("Registering provider: %s", model_name)
+        try:
+            chain, store = _build_rag_chain(llm)
+        except Exception as exc:
+            logging.exception("Failed to build RAG chain for provider %s: %s", model_name, exc)
+            return
         if vectorstore is None:
             vectorstore = store
         providers.append((model_name, chain))
@@ -208,24 +217,28 @@ def load_rag_pipeline(
     gemini_pro_llm = None
     if _google_api_key and ENABLE_GEMINI_BACKUP:
         try:
+            logging.info("Attempting to initialize Gemini flash model: %s", _gemini_model_flash)
             gemini_flash_llm = ChatGoogleGenerativeAI(
                 model=_gemini_model_flash,
                 temperature=0.2,
                 google_api_key=_google_api_key,
                 max_output_tokens=8192,
             )
-        except Exception:
+        except Exception as exc:
             gemini_flash_llm = None
+            logging.exception("Gemini flash init failed: %s", exc)
 
         try:
+            logging.info("Attempting to initialize Gemini pro model: %s", _gemini_model_pro)
             gemini_pro_llm = ChatGoogleGenerativeAI(
                 model=_gemini_model_pro,
                 temperature=0.2,
                 google_api_key=_google_api_key,
                 max_output_tokens=8192,
             )
-        except Exception:
+        except Exception as exc:
             gemini_pro_llm = None
+            logging.exception("Gemini pro init failed: %s", exc)
 
     if gemini_flash_llm is not None:
         _register_provider(f"gemini-{_gemini_model_flash}", gemini_flash_llm)
@@ -242,7 +255,9 @@ def load_rag_pipeline(
         )
         _register_provider(f"groq-{_groq_model}", groq_llm)
 
+    logging.info("Providers registered: %s", [p[0] for p in providers])
     if not providers:
+        logging.error("No LLM providers were configured — raising RuntimeError")
         raise RuntimeError("No LLM providers are configured.")
 
     return {
@@ -359,13 +374,17 @@ def _invoke_with_fallback(bundle, user_query, chat_history):
     last_error = None
 
     for model_name, chain in attempts:
+        logging.info("Attempting model: %s", model_name)
         if chain is None:
+            logging.warning("Skipping model %s because chain is None", model_name)
             continue
         try:
             response = chain.invoke({"input": user_query, "chat_history": chat_history})
+            logging.info("Model %s returned a response", model_name)
             return response, model_name, None
         except Exception as exc:
             last_error = exc
+            logging.exception("Model %s failed with exception: %s", model_name, exc)
 
     raise last_error or RuntimeError("No model available for inference")
 

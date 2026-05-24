@@ -20,6 +20,7 @@ Author: CodeMiner
 Date: March 2026
 """
 
+import json
 import os
 import shutil
 import stat
@@ -55,7 +56,7 @@ CODE_EXTENSIONS = {
     ".ts": Language.TS,
     ".tsx": Language.TS,
     ".py": Language.PYTHON,
-    ".css": Language.CSS,
+    ".css": "CSS",
     ".html": Language.HTML,
     ".htm": Language.HTML,
     ".md": None,  # Markdown uses fallback splitter
@@ -197,20 +198,27 @@ def get_repo_stats(documents: List[Document], images_processed: int) -> Dict:
         dict: Repository statistics including file counts and tech stack
     """
 
-    # Extract file extensions from metadata
-    # Each LangChain Document has metadata["source"] = file path
-    extensions = []
+    # Count by unique file path so the breakdowns report files, not chunks.
+    # A single README chunked into many pieces should still count as one .md.
+    unique_sources = {
+        doc.metadata.get("source") for doc in documents if doc.metadata.get("source")
+    }
+    file_extensions = []
+    chunk_extensions = []
+    for source in unique_sources:
+        ext = Path(source).suffix
+        if ext:
+            file_extensions.append(ext)
     for doc in documents:
         source = doc.metadata.get("source", "")
         if source:
             ext = Path(source).suffix
             if ext:
-                extensions.append(ext)
+                chunk_extensions.append(ext)
 
-    # Count occurrences of each extension
-    ext_counter = Counter(extensions)
+    file_ext_counter = Counter(file_extensions)
+    chunk_ext_counter = Counter(chunk_extensions)
 
-    # Determine primary tech stack mapping
     tech_map = {
         ".js": "JavaScript",
         ".jsx": "React",
@@ -223,22 +231,144 @@ def get_repo_stats(documents: List[Document], images_processed: int) -> Dict:
         ".md": "Markdown",
     }
 
-    # Build a structured languages dict mapping human-readable name -> count
-    language_counts = {}
-    for ext, count in ext_counter.items():
+    # Language counts are by unique file so the donut reflects repo composition,
+    # not how aggressive the chunker was on any one file.
+    language_counts: Dict[str, int] = {}
+    for ext, count in file_ext_counter.items():
         human = tech_map.get(ext, ext.lstrip(".") or "Other")
         language_counts[human] = language_counts.get(human, 0) + count
 
-    # Extension breakdown full (sorted by frequency)
-    extension_breakdown = {k: v for k, v in ext_counter.most_common()}
+    extension_breakdown = {k: v for k, v in file_ext_counter.most_common()}
+    chunk_breakdown = {k: v for k, v in chunk_ext_counter.most_common()}
 
     return {
-        "total_files": len(set(doc.metadata.get("source") for doc in documents)),
+        "total_files": len(unique_sources),
         "total_chunks": len(documents),
         "languages": language_counts,
         "images_processed": images_processed,
         "extension_breakdown": extension_breakdown,
+        "chunk_breakdown": chunk_breakdown,
     }
+
+
+# ==============================================================================
+# REPOSITORY ANALYTICS HELPERS
+# ==============================================================================
+
+
+def _compute_contributors(repo_dir: str, limit: int = 10) -> List[Dict]:
+    """Aggregate commits per author from the cloned repo's full git history."""
+    try:
+        repo = Repo(repo_dir)
+    except Exception:
+        return []
+
+    counts: Counter = Counter()
+    for commit in repo.iter_commits():
+        name = (commit.author.name or "").strip() or "Unknown"
+        counts[name] += 1
+
+    return [
+        {"name": name, "commits": count}
+        for name, count in counts.most_common(limit)
+    ]
+
+
+def _compute_hotspots(repo_dir: str, limit: int = 8) -> List[Dict]:
+    """Return the files touched by the most commits (a churn-based hotspot proxy).
+
+    The `complexity` field on each entry is the commit count for that file, which
+    the dashboard renders as the hotspot's intensity. `lines` is the file's
+    current line count on disk.
+    """
+    try:
+        repo = Repo(repo_dir)
+    except Exception:
+        return []
+
+    churn: Counter = Counter()
+    for commit in repo.iter_commits():
+        # commit.stats.files is a dict of {path: {insertions, deletions, lines}}
+        try:
+            for path in commit.stats.files.keys():
+                churn[path] += 1
+        except Exception:
+            continue
+
+    repo_root = Path(repo_dir)
+    hotspots: List[Dict] = []
+    for path, commits in churn.most_common(limit):
+        full = repo_root / path
+        line_count = 0
+        if full.exists() and full.is_file():
+            try:
+                with open(full, "r", encoding="utf-8", errors="ignore") as fh:
+                    line_count = sum(1 for _ in fh)
+            except Exception:
+                line_count = 0
+        hotspots.append({"path": path, "complexity": commits, "lines": line_count})
+    return hotspots
+
+
+def _compute_dependencies(repo_dir: str) -> List[Dict]:
+    """Read declared dependencies from common manifest files.
+
+    Currently supports `package.json` (Node) and `requirements.txt` (Python).
+    Returns a list of {name, version, source} entries. License and vulnerability
+    fields are intentionally left blank — populating them accurately requires a
+    network call to npm/PyPI that we do not want to add here.
+    """
+    root = Path(repo_dir)
+    deps: List[Dict] = []
+    seen: set = set()
+
+    def _add(name: str, version: str, source: str) -> None:
+        key = (name, source)
+        if not name or key in seen:
+            return
+        seen.add(key)
+        deps.append({"name": name, "version": version or "", "source": source})
+
+    # package.json — repo root only; nested node_modules manifests are noise.
+    pkg_json = root / "package.json"
+    if pkg_json.is_file():
+        try:
+            data = json.loads(pkg_json.read_text(encoding="utf-8"))
+            for field in ("dependencies", "devDependencies", "peerDependencies"):
+                for name, version in (data.get(field) or {}).items():
+                    _add(name, str(version), "package.json")
+        except Exception:
+            pass
+
+    # requirements.txt and common pinned variants. Parse lazily: skip blanks,
+    # comments, and editable/url installs that have no clean name@version form.
+    for req_path in (
+        root / "requirements.txt",
+        root / "requirements" / "base.txt",
+        root / "requirements" / "prod.txt",
+    ):
+        if not req_path.is_file():
+            continue
+        try:
+            for raw_line in req_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or line.startswith("-"):
+                    continue
+                # Strip inline comments and environment markers.
+                line = line.split("#", 1)[0].strip()
+                line = line.split(";", 1)[0].strip()
+                if not line:
+                    continue
+                name, _, version = line.partition("==")
+                if not version:
+                    name, _, version = line.partition(">=")
+                if not version:
+                    name, _, version = line.partition("~=")
+                _add(name.strip(), version.strip(), req_path.name)
+        except Exception:
+            continue
+
+    return deps[:60]
 
 
 # ==============================================================================
@@ -246,7 +376,7 @@ def get_repo_stats(documents: List[Document], images_processed: int) -> Dict:
 # ==============================================================================
 
 
-def process_repository(github_url: str) -> Tuple[bool, Dict]:
+def process_repository(github_url: str, persist_dir: str | None = None) -> Tuple[bool, Dict]:
     """
     Complete end-to-end repository ingestion pipeline.
 
@@ -448,9 +578,14 @@ def process_repository(github_url: str) -> Tuple[bool, Dict]:
         # 3. Stores metadata in SQLite for retrieval
         # 4. Persists to disk at CHROMA_DIR
 
-        print(f"💾 Storing {len(documents)} chunks in ChromaDB...")
+        target_dir = persist_dir or CHROMA_DIR
+        # Make sure the target dir is empty so we never append into a previous
+        # repo's vectorstore (which is what produced the chunk-bleed bug).
+        if os.path.exists(target_dir):
+            safe_rmtree(target_dir)
+        print(f"💾 Storing {len(documents)} chunks in ChromaDB at {target_dir}...")
         vectorstore = Chroma.from_documents(
-            documents=documents, embedding=embeddings, persist_directory=CHROMA_DIR
+            documents=documents, embedding=embeddings, persist_directory=target_dir
         )
 
         print("✅ Ingestion complete!")
@@ -473,6 +608,21 @@ def process_repository(github_url: str) -> Tuple[bool, Dict]:
             stats["top_files"] = top_files
         except Exception:
             stats["top_files"] = []
+
+        try:
+            stats["contributors"] = _compute_contributors(CLONE_DIR)
+        except Exception:
+            stats["contributors"] = []
+
+        try:
+            stats["hotspots"] = _compute_hotspots(CLONE_DIR)
+        except Exception:
+            stats["hotspots"] = []
+
+        try:
+            stats["dependencies"] = _compute_dependencies(CLONE_DIR)
+        except Exception:
+            stats["dependencies"] = []
 
         # Persist a snapshot of stats for faster re-use
         try:
