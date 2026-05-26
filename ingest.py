@@ -35,6 +35,15 @@ from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from advanced_analytics import (
+    compute_complexity_metrics,
+    compute_hotspots_over_time,
+    compute_language_insights,
+    summarize_complexity_rows,
+    summarize_language_insights,
+)
+from architecture_reports import generate_architecture_mermaid
+from coverage_import import coverage_summary, load_coverage_from_repo
 
 # ==============================================================================
 # CONFIGURATION
@@ -623,6 +632,51 @@ def process_repository(github_url: str, persist_dir: str | None = None) -> Tuple
             stats["dependencies"] = _compute_dependencies(CLONE_DIR)
         except Exception:
             stats["dependencies"] = []
+
+        repo_root = Path(CLONE_DIR)
+
+        try:
+            complexity_rows = compute_complexity_metrics(repo_root)
+            stats["complexity_metrics"] = complexity_rows
+            stats["complexity_summary"] = summarize_complexity_rows(complexity_rows)
+        except Exception:
+            stats["complexity_metrics"] = []
+            stats["complexity_summary"] = {}
+
+        try:
+            language_insights = compute_language_insights(repo_root)
+            stats["language_insights"] = language_insights
+            stats["language_insights_summary"] = summarize_language_insights(language_insights)
+        except Exception:
+            stats["language_insights"] = {}
+            stats["language_insights_summary"] = {}
+
+        try:
+            stats["hotspots_over_time"] = compute_hotspots_over_time(repo_root)
+        except Exception:
+            stats["hotspots_over_time"] = {}
+
+        try:
+            coverage_rows = load_coverage_from_repo(repo_root)
+            stats["coverage_import"] = {
+                "summary": coverage_summary(coverage_rows),
+                "files": [
+                    {
+                        "path": row.path,
+                        "lines_covered": row.lines_covered,
+                        "lines_total": row.lines_total,
+                        "coverage_pct": row.coverage_pct,
+                    }
+                    for row in coverage_rows
+                ],
+            }
+        except Exception:
+            stats["coverage_import"] = {"summary": {}, "files": []}
+
+        try:
+            stats["architecture_mermaid"] = generate_architecture_mermaid(repo_root)
+        except Exception:
+            stats["architecture_mermaid"] = ""
 
         # Persist a snapshot of stats for faster re-use
         try:

@@ -8,6 +8,7 @@ import secrets
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict
 from urllib.parse import urlencode
 
@@ -55,6 +56,9 @@ from repo_session_store import (
     session_vectorstore_dir,
 )
 from ingest import process_repository
+from architecture_reports import build_report_bundle
+from coverage_import import map_coverage_to_repo, parse_coverage_py_xml, parse_lcov
+from rag_eval import evaluate_retrieval, load_eval_dataset, load_vectorstore
 import openai
 import json
 import requests
@@ -379,6 +383,16 @@ class ProcessRequest(BaseModel):
     repoUrl: str
 
 
+class CoverageImportRequest(BaseModel):
+    filename: str
+    content: str
+
+
+class EvalRequest(BaseModel):
+    cases: list[dict[str, Any]]
+    k: int = 6
+
+
 @app.get('/api/sessions')
 def api_list_sessions(request: Request):
     user = _require_user(request)
@@ -478,6 +492,140 @@ def api_get_stats(session_id: str, request: Request):
     if not payload:
         raise HTTPException(status_code=404, detail='Session not found')
     return payload.get('repo_stats', {})
+
+
+@app.get('/api/sessions/{session_id}/reports')
+def api_get_reports(session_id: str, request: Request):
+    user = _require_user(request)
+    session_id = _resolve_session_id(session_id, user["id"])
+    payload = load_session(session_id, user_id=user["id"])
+    if not payload:
+        raise HTTPException(status_code=404, detail='Session not found')
+
+    stats = payload.get('repo_stats') or {}
+    repo_root = Path('./cloned_repo')
+    coverage_rows = (stats.get('coverage_import') or {}).get('files') or []
+    if not isinstance(coverage_rows, list):
+        coverage_rows = []
+
+    bundle = build_report_bundle(
+        repo_root=repo_root,
+        stats=stats,
+        complexity_rows=stats.get('complexity_metrics') or [],
+        coverage_rows=coverage_rows,
+        hotspot_rows=stats.get('hotspots') or [],
+        rag_eval_summary=stats.get('rag_eval_summary') or {},
+    )
+
+    pdf_bytes = bundle.get('summary_pdf') or b''
+    return {
+        'summaryMarkdown': bundle.get('summary_markdown') or '',
+        'onboardingMarkdown': bundle.get('onboarding_markdown') or '',
+        'architectureMermaid': bundle.get('mermaid_diagram') or '',
+        'summaryPdfBase64': base64.b64encode(pdf_bytes).decode('utf-8') if pdf_bytes else None,
+    }
+
+
+@app.post('/api/sessions/{session_id}/coverage/import')
+def api_import_coverage(session_id: str, request: Request, body: CoverageImportRequest):
+    user = _require_user(request)
+    session_id = _resolve_session_id(session_id, user["id"])
+    payload = load_session(session_id, user_id=user["id"])
+    if not payload:
+        raise HTTPException(status_code=404, detail='Session not found')
+
+    repo_root = Path('./cloned_repo')
+    filename = (body.filename or '').lower()
+    if filename.endswith('.xml'):
+        parsed = parse_coverage_py_xml(body.content)
+    else:
+        parsed = parse_lcov(body.content)
+
+    mapped = map_coverage_to_repo(repo_root, parsed)
+    import_rows = [
+        {
+            'path': row.path,
+            'lines_covered': row.lines_covered,
+            'lines_total': row.lines_total,
+            'coverage_pct': row.coverage_pct,
+        }
+        for row in mapped
+    ]
+
+    current_stats = payload.get('repo_stats') or {}
+    existing_rows = (current_stats.get('coverage_import') or {}).get('files') or []
+    if not isinstance(existing_rows, list):
+        existing_rows = []
+
+    merged_rows: dict[str, dict[str, Any]] = {}
+    for row in existing_rows + import_rows:
+        path = str(row.get('path') or '')
+        if path:
+            merged_rows[path] = row
+
+    merged_list = list(merged_rows.values())
+    total_files = len(merged_list)
+    total_lines = sum(int(row.get('lines_total') or 0) for row in merged_list)
+    covered_lines = sum(int(row.get('lines_covered') or 0) for row in merged_list)
+    covered_files = sum(1 for row in merged_list if int(row.get('lines_covered') or 0) > 0)
+    current_stats['coverage_import'] = {
+        'files': total_files,
+        'covered_files': covered_files,
+        'lines_covered': covered_lines,
+        'lines_total': total_lines,
+        'coverage_pct': round((covered_lines / total_lines * 100.0) if total_lines else 0.0, 2),
+    }
+    current_stats['coverage_import'] = {
+        'summary': current_stats['coverage_import'],
+        'files': merged_list,
+    }
+
+    save_session(
+        repo_name=payload.get('repo_name') or 'repo',
+        repo_url=payload.get('repo_url') or '',
+        repo_stats=current_stats,
+        messages=payload.get('messages') or [],
+        chat_history=payload.get('chat_history') or [],
+        user_id=user['id'],
+        session_id=session_id,
+    )
+    return current_stats['coverage_import']
+
+
+@app.post('/api/sessions/{session_id}/evaluate')
+def api_evaluate(session_id: str, request: Request, body: EvalRequest):
+    user = _require_user(request)
+    session_id = _resolve_session_id(session_id, user["id"])
+    payload = load_session(session_id, user_id=user["id"])
+    if not payload:
+        raise HTTPException(status_code=404, detail='Session not found')
+
+    if not body.cases:
+        raise HTTPException(status_code=400, detail='Missing evaluation cases')
+
+    session_dir = session_vectorstore_dir(session_id)
+    if not os.path.exists(session_dir):
+        raise HTTPException(status_code=404, detail='Vectorstore snapshot not found')
+
+    if HuggingFaceEmbeddings is None or Chroma is None:
+        raise HTTPException(status_code=503, detail='Retrieval dependencies unavailable')
+
+    vectorstore = load_vectorstore(session_dir)
+    eval_cases = load_eval_dataset(json.dumps(body.cases).encode('utf-8'))
+    result = evaluate_retrieval(vectorstore, eval_cases, k=body.k)
+
+    current_stats = payload.get('repo_stats') or {}
+    current_stats['rag_eval_summary'] = result.get('summary') or {}
+    save_session(
+        repo_name=payload.get('repo_name') or 'repo',
+        repo_url=payload.get('repo_url') or '',
+        repo_stats=current_stats,
+        messages=payload.get('messages') or [],
+        chat_history=payload.get('chat_history') or [],
+        user_id=user['id'],
+        session_id=session_id,
+    )
+    return result
 
 
 @app.get('/api/sessions/{session_id}/chunks')

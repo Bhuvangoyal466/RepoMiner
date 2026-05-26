@@ -13,7 +13,19 @@ from ingest import get_repo_stats
 import os
 import pandas as pd
 import json
+from pathlib import Path
 from git import Repo
+from advanced_analytics import summarize_complexity_rows, summarize_language_insights
+from architecture_reports import build_report_bundle
+from coverage_import import (
+    coverage_summary,
+    load_coverage_from_repo,
+    map_coverage_to_repo,
+    parse_coverage_py_xml,
+    parse_lcov,
+)
+from rag_eval import evaluate_retrieval, load_eval_dataset, load_vectorstore
+from repo_session_store import load_index, session_vectorstore_dir
 from ui import (
     apply_base_ui,
     render_sidebar_brand,
@@ -24,6 +36,70 @@ from ui import (
     render_pill_row,
     render_empty_state,
 )
+
+
+def _current_session_id() -> str | None:
+    session_id = st.session_state.get("current_session_id")
+    if session_id:
+        return session_id
+    return load_index().get("current_session_id")
+
+
+def _rows_from_stats(stats: dict, key: str) -> list[dict]:
+    rows = (stats.get(key) or []) if isinstance(stats, dict) else []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _coverage_rows_from_upload(uploaded_file) -> list[dict]:
+    if not uploaded_file:
+        return []
+
+    raw = uploaded_file.getvalue()
+    filename = (uploaded_file.name or "").lower()
+    try:
+        text = raw.decode("utf-8", errors="ignore")
+    except Exception:
+        text = ""
+
+    if filename.endswith(".xml"):
+        parsed = parse_coverage_py_xml(text)
+    else:
+        parsed = parse_lcov(text)
+
+    mapped = map_coverage_to_repo(Path("./cloned_repo"), parsed)
+    return [
+        {
+            "path": item.path,
+            "lines_covered": item.lines_covered,
+            "lines_total": item.lines_total,
+            "coverage_pct": item.coverage_pct,
+        }
+        for item in mapped
+    ]
+
+
+def _merge_coverage_rows(auto_rows: list[dict], uploaded_rows: list[dict]) -> list[dict]:
+    merged: dict[str, dict] = {}
+    for row in auto_rows + uploaded_rows:
+        path = str(row.get("path") or "")
+        if not path:
+            continue
+        merged[path] = row
+    return list(merged.values())
+
+
+def _evaluate_rag_dataset(uploaded_file, session_id: str | None) -> dict | None:
+    if not uploaded_file or not session_id:
+        return None
+
+    try:
+        cases = load_eval_dataset(uploaded_file.getvalue())
+        if not cases:
+            return None
+        vectorstore = load_vectorstore(session_vectorstore_dir(session_id))
+        return evaluate_retrieval(vectorstore, cases, k=6)
+    except Exception:
+        return None
 
 # Page Configuration
 st.set_page_config(
@@ -446,74 +522,160 @@ elif st.session_state.get("repo_stats"):
         st.error(f"Dependency analysis failed: {e}")
 
     section_header(
-        "Complexity",
-        "Code complexity and hotspots",
-        "A quick view into the largest and most active files.",
+        "Advanced Analytics",
+        "Complexity, coverage, hotspots, and language signals",
+        "These metrics are pulled from the saved stats payload, with optional coverage and evaluation imports layered in.",
     )
-    try:
-        from pathlib import Path
 
-        repo_root = Path("./cloned_repo")
-        code_exts = {".py", ".js", ".ts", ".java", ".go", ".cpp", ".c", ".cs"}
-        files = [
-            p for p in repo_root.rglob("*") if p.is_file() and p.suffix in code_exts
-        ]
-        metrics = []
-        repo = None
-        try:
-            repo = Repo(str(repo_root))
-        except Exception:
-            repo = None
+    repo_root = Path("./cloned_repo")
+    session_id = _current_session_id()
+    complexity_rows = _rows_from_stats(stats, "complexity_metrics")
+    complexity_summary = stats.get("complexity_summary") or summarize_complexity_rows(complexity_rows)
+    language_summary = stats.get("language_insights_summary") or summarize_language_insights(stats.get("language_insights") or {})
+    hotspot_timeline = (stats.get("hotspots_over_time") or {}).get("timeline") or {}
+    hotspot_rows = stats.get("hotspots") or []
 
-        for p in files:
-            try:
-                txt = p.read_text(encoding="utf-8", errors="ignore")
-                loc = len(txt.splitlines())
-                funcs = 0
-                if p.suffix == ".py":
-                    funcs = txt.count("\ndef ") + txt.count("\nclass ")
-                else:
-                    funcs = (
-                        txt.count("function ") + txt.count("=>") + txt.count("class ")
-                    )
+    auto_coverage_rows = (stats.get("coverage_import") or {}).get("files") or []
+    if not isinstance(auto_coverage_rows, list):
+        auto_coverage_rows = []
+    uploaded_coverage = st.file_uploader(
+        "Optional coverage report",
+        type=["xml", "info"],
+        help="Upload coverage.xml or lcov.info to layer test coverage into the report outputs.",
+        key="coverage_upload",
+    )
+    uploaded_coverage_rows = _coverage_rows_from_upload(uploaded_coverage)
+    coverage_rows = _merge_coverage_rows(auto_coverage_rows, uploaded_coverage_rows)
+    coverage_summary_data = coverage_summary(coverage_rows)
 
-                churn = 0
-                if repo:
-                    try:
-                        commits_touching = list(
-                            repo.iter_commits(
-                                paths=str(p.relative_to(repo_root)), max_count=5000
-                            )
-                        )
-                        churn = len(commits_touching)
-                    except Exception:
-                        churn = 0
+    uploaded_eval = st.file_uploader(
+        "Optional RAG evaluation dataset",
+        type=["json"],
+        help="Upload a JSON list of benchmark questions to calculate hit@k, MRR, precision, recall, and latency.",
+        key="rag_eval_upload",
+    )
+    eval_col1, eval_col2 = st.columns(2)
+    with eval_col1:
+        if st.button("Run RAG Evaluation", use_container_width=True):
+            summary = _evaluate_rag_dataset(uploaded_eval, session_id)
+            if summary:
+                st.session_state["rag_eval_summary"] = summary
+            else:
+                st.info("Upload a valid evaluation dataset and make sure a session is active.")
+    with eval_col2:
+        if st.button("Clear Eval Results", use_container_width=True):
+            st.session_state.pop("rag_eval_summary", None)
 
-                metrics.append(
-                    {
-                        "file": str(p.relative_to(repo_root)),
-                        "loc": loc,
-                        "funcs": funcs,
-                        "churn": churn,
-                    }
-                )
-            except Exception:
-                continue
+    rag_eval_summary = st.session_state.get("rag_eval_summary") or stats.get("rag_eval_summary") or {}
+    bundle = build_report_bundle(
+        repo_root=repo_root,
+        stats=stats,
+        complexity_rows=complexity_rows,
+        coverage_rows=coverage_rows,
+        hotspot_rows=hotspot_rows,
+        rag_eval_summary=rag_eval_summary,
+    )
 
-        if metrics:
-            dfm = pd.DataFrame(metrics)
-            # Simple hotspot score
-            dfm["score"] = (
-                (dfm["loc"] / (dfm["loc"].max() or 1)) * 0.5
-                + dfm["funcs"] * 0.3
-                + (dfm["churn"] / (dfm["churn"].max() or 1)) * 0.7
+    metric_a, metric_b, metric_c, metric_d = st.columns(4)
+    with metric_a:
+        render_metric_card("Complex files", str(complexity_summary.get("files", 0)), "Files with computed complexity")
+    with metric_b:
+        render_metric_card("Avg CC", str(complexity_summary.get("cc_avg", "N/A")), "Average cyclomatic complexity")
+    with metric_c:
+        render_metric_card("Avg MI", str(complexity_summary.get("maintainability_index_avg", "N/A")), "Maintainability index average")
+    with metric_d:
+        render_metric_card("Coverage", f"{coverage_summary_data.get('coverage_pct', 0.0):.2f}%", "Imported test coverage")
+
+    analytics_left, analytics_right = st.columns(2)
+    with analytics_left:
+        render_info_card(
+            "Language insights",
+            f"Scanned {language_summary.get('files_scanned', 0)} files across {language_summary.get('language_count', 0)} languages. Dominant language: {language_summary.get('dominant_language') or 'N/A'}.",
+            accent="Stack",
+        )
+        if language_summary.get("language_counts"):
+            df_lang = pd.DataFrame(
+                list(language_summary["language_counts"].items()),
+                columns=["language", "count"],
+            ).set_index("language")
+            st.bar_chart(df_lang)
+        with st.expander("Language and extension details"):
+            st.json(language_summary)
+
+    with analytics_right:
+        render_info_card(
+            "Hotspots over time",
+            f"{(stats.get('hotspots_over_time') or {}).get('commits_scanned', 0)} commits scanned. The hottest files are surfaced below.",
+            accent="Churn",
+        )
+        if hotspot_timeline:
+            timeline_df = pd.Series(hotspot_timeline).sort_index()
+            st.line_chart(timeline_df)
+        elif hotspot_rows:
+            st.dataframe(pd.DataFrame(hotspot_rows)[["path", "complexity", "lines"]].head(10))
+
+    if complexity_rows:
+        st.dataframe(pd.DataFrame(complexity_rows).sort_values(["cc_max", "loc"], ascending=[False, False]).head(10))
+    else:
+        render_empty_state(
+            "No complexity data available",
+            "The current repository did not yield any computed complexity metrics.",
+            accent="Complexity",
+        )
+
+    report_cols = st.columns(3)
+    with report_cols[0]:
+        st.download_button(
+            "⬇️ Summary Markdown",
+            data=bundle["summary_markdown"].encode("utf-8"),
+            file_name="repo_summary.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+    with report_cols[1]:
+        pdf_bytes = bundle.get("summary_pdf") or b""
+        if pdf_bytes:
+            st.download_button(
+                "⬇️ Summary PDF",
+                data=pdf_bytes,
+                file_name="repo_summary.pdf",
+                mime="application/pdf",
+                use_container_width=True,
             )
-            top_hotspots = dfm.sort_values("score", ascending=False).head(10)
-            st.dataframe(top_hotspots[["file", "loc", "funcs", "churn", "score"]])
         else:
-            st.info("No code files found for complexity analysis")
-    except Exception as e:
-        st.error(f"Complexity analysis failed: {e}")
+            st.button("Summary PDF unavailable", disabled=True, use_container_width=True)
+    with report_cols[2]:
+        st.download_button(
+            "⬇️ Onboarding Markdown",
+            data=bundle["onboarding_markdown"].encode("utf-8"),
+            file_name="repo_onboarding.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+
+    if bundle.get("mermaid_diagram"):
+        with st.expander("Architecture diagram source"):
+            st.code(bundle["mermaid_diagram"], language="mermaid")
+
+    if rag_eval_summary:
+        eval_df = pd.DataFrame(
+            [
+                {"metric": "cases", "value": rag_eval_summary.get("cases")},
+                {"metric": "hit_at_k", "value": rag_eval_summary.get("hit_at_k")},
+                {"metric": "mrr", "value": rag_eval_summary.get("mrr")},
+                {"metric": "precision_at_k", "value": rag_eval_summary.get("precision_at_k")},
+                {"metric": "recall_at_k", "value": rag_eval_summary.get("recall_at_k")},
+                {"metric": "avg_retrieval_ms", "value": rag_eval_summary.get("avg_retrieval_ms")},
+                {"metric": "p95_retrieval_ms", "value": rag_eval_summary.get("p95_retrieval_ms")},
+            ]
+        )
+        st.dataframe(eval_df, hide_index=True)
+    else:
+        render_empty_state(
+            "No evaluation dataset loaded",
+            "Upload a benchmark JSON file to calculate retrieval metrics for the repository's RAG stack.",
+            accent="Evaluation",
+        )
 
     section_header(
         "Security",
