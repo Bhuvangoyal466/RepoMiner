@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Search } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { AuthUser } from '../lib/api'
 
 type TopBarProps = {
@@ -10,7 +11,64 @@ type TopBarProps = {
 
 export default function TopBar({ user, onLogout, onLogin }: TopBarProps){
   const [menuOpen, setMenuOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const menuRef = useRef<HTMLDivElement | null>(null)
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  useEffect(() => {
+    const nextQuery = new URLSearchParams(location.search).get('q') || ''
+    setQuery(nextQuery)
+  }, [location.pathname, location.search])
+
+  function applySearch(pathname: string, value: string) {
+    const params = new URLSearchParams(location.search)
+    if (value) {
+      params.set('q', value)
+    } else {
+      params.delete('q')
+    }
+    const nextQuery = params.toString()
+    navigate(nextQuery ? `${pathname}?${nextQuery}` : pathname)
+  }
+
+  function handleSearchSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const value = query.trim()
+    if (!value) {
+      applySearch(location.pathname, '')
+      return
+    }
+
+    const normalized = value.toLowerCase()
+    if (normalized === 'home') {
+      navigate('/')
+      return
+    }
+    if (normalized.includes('session')) {
+      applySearch('/sessions', value)
+      return
+    }
+    if (normalized.includes('analytics') || normalized.includes('stat') || normalized.includes('dashboard')) {
+      applySearch('/stats', value)
+      return
+    }
+    if (normalized.includes('chat')) {
+      applySearch('/chat', value)
+      return
+    }
+    if (normalized.includes('repo') || normalized.includes('ingest')) {
+      navigate('/repo')
+      return
+    }
+
+    if (location.pathname === '/stats' || location.pathname === '/sessions' || location.pathname === '/chat') {
+      applySearch(location.pathname, value)
+      return
+    }
+
+    applySearch('/stats', value)
+  }
 
   useEffect(() => {
     function handleDocumentClick(event: MouseEvent) {
@@ -43,14 +101,19 @@ export default function TopBar({ user, onLogout, onLogin }: TopBarProps){
   return (
     <header className="relative z-20 h-16 flex items-center gap-4 px-6 border-b border-white/6 bg-[#0b1020]/85 backdrop-blur-md shrink-0">
       <div className="flex items-center gap-3 w-full min-w-0">
-        <div className="flex items-center gap-3 w-full max-w-2xl rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 shadow-soft-lg backdrop-blur-sm focus-within:border-accent/40 focus-within:bg-white/7">
+        <form
+          onSubmit={handleSearchSubmit}
+          className="flex items-center gap-3 w-full max-w-2xl rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 shadow-soft-lg backdrop-blur-sm focus-within:border-accent/40 focus-within:bg-white/7"
+        >
           <Search size={17} className="shrink-0 text-gray-300" />
           <input
             type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
             placeholder="Search sessions, files, commands..."
             className="w-full bg-transparent outline-none placeholder:text-muted text-sm text-white"
           />
-        </div>
+        </form>
       </div>
       <div ref={menuRef} className="relative shrink-0">
         <button

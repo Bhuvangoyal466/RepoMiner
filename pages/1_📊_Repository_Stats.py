@@ -24,8 +24,6 @@ from coverage_import import (
     parse_coverage_py_xml,
     parse_lcov,
 )
-from rag_eval import evaluate_retrieval, load_eval_dataset, load_vectorstore
-from repo_session_store import load_index, session_vectorstore_dir
 from ui import (
     apply_base_ui,
     render_sidebar_brand,
@@ -36,14 +34,6 @@ from ui import (
     render_pill_row,
     render_empty_state,
 )
-
-
-def _current_session_id() -> str | None:
-    session_id = st.session_state.get("current_session_id")
-    if session_id:
-        return session_id
-    return load_index().get("current_session_id")
-
 
 def _rows_from_stats(stats: dict, key: str) -> list[dict]:
     rows = (stats.get(key) or []) if isinstance(stats, dict) else []
@@ -87,19 +77,6 @@ def _merge_coverage_rows(auto_rows: list[dict], uploaded_rows: list[dict]) -> li
         merged[path] = row
     return list(merged.values())
 
-
-def _evaluate_rag_dataset(uploaded_file, session_id: str | None) -> dict | None:
-    if not uploaded_file or not session_id:
-        return None
-
-    try:
-        cases = load_eval_dataset(uploaded_file.getvalue())
-        if not cases:
-            return None
-        vectorstore = load_vectorstore(session_vectorstore_dir(session_id))
-        return evaluate_retrieval(vectorstore, cases, k=6)
-    except Exception:
-        return None
 
 # Page Configuration
 st.set_page_config(
@@ -524,11 +501,10 @@ elif st.session_state.get("repo_stats"):
     section_header(
         "Advanced Analytics",
         "Complexity, coverage, hotspots, and language signals",
-        "These metrics are pulled from the saved stats payload, with optional coverage and evaluation imports layered in.",
+        "These metrics are pulled from the saved stats payload, with optional coverage imports layered in.",
     )
 
     repo_root = Path("./cloned_repo")
-    session_id = _current_session_id()
     complexity_rows = _rows_from_stats(stats, "complexity_metrics")
     complexity_summary = stats.get("complexity_summary") or summarize_complexity_rows(complexity_rows)
     language_summary = stats.get("language_insights_summary") or summarize_language_insights(stats.get("language_insights") or {})
@@ -548,25 +524,7 @@ elif st.session_state.get("repo_stats"):
     coverage_rows = _merge_coverage_rows(auto_coverage_rows, uploaded_coverage_rows)
     coverage_summary_data = coverage_summary(coverage_rows)
 
-    uploaded_eval = st.file_uploader(
-        "Optional RAG evaluation dataset",
-        type=["json"],
-        help="Upload a JSON list of benchmark questions to calculate hit@k, MRR, precision, recall, and latency.",
-        key="rag_eval_upload",
-    )
-    eval_col1, eval_col2 = st.columns(2)
-    with eval_col1:
-        if st.button("Run RAG Evaluation", use_container_width=True):
-            summary = _evaluate_rag_dataset(uploaded_eval, session_id)
-            if summary:
-                st.session_state["rag_eval_summary"] = summary
-            else:
-                st.info("Upload a valid evaluation dataset and make sure a session is active.")
-    with eval_col2:
-        if st.button("Clear Eval Results", use_container_width=True):
-            st.session_state.pop("rag_eval_summary", None)
-
-    rag_eval_summary = st.session_state.get("rag_eval_summary") or stats.get("rag_eval_summary") or {}
+    rag_eval_summary = {}
     bundle = build_report_bundle(
         repo_root=repo_root,
         stats=stats,
@@ -656,26 +614,6 @@ elif st.session_state.get("repo_stats"):
     if bundle.get("mermaid_diagram"):
         with st.expander("Architecture diagram source"):
             st.code(bundle["mermaid_diagram"], language="mermaid")
-
-    if rag_eval_summary:
-        eval_df = pd.DataFrame(
-            [
-                {"metric": "cases", "value": rag_eval_summary.get("cases")},
-                {"metric": "hit_at_k", "value": rag_eval_summary.get("hit_at_k")},
-                {"metric": "mrr", "value": rag_eval_summary.get("mrr")},
-                {"metric": "precision_at_k", "value": rag_eval_summary.get("precision_at_k")},
-                {"metric": "recall_at_k", "value": rag_eval_summary.get("recall_at_k")},
-                {"metric": "avg_retrieval_ms", "value": rag_eval_summary.get("avg_retrieval_ms")},
-                {"metric": "p95_retrieval_ms", "value": rag_eval_summary.get("p95_retrieval_ms")},
-            ]
-        )
-        st.dataframe(eval_df, hide_index=True)
-    else:
-        render_empty_state(
-            "No evaluation dataset loaded",
-            "Upload a benchmark JSON file to calculate retrieval metrics for the repository's RAG stack.",
-            accent="Evaluation",
-        )
 
     section_header(
         "Security",

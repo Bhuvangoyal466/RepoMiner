@@ -514,7 +514,7 @@ def api_get_reports(session_id: str, request: Request):
         complexity_rows=stats.get('complexity_metrics') or [],
         coverage_rows=coverage_rows,
         hotspot_rows=stats.get('hotspots') or [],
-        rag_eval_summary=stats.get('rag_eval_summary') or {},
+        rag_eval_summary={},
     )
 
     pdf_bytes = bundle.get('summary_pdf') or b''
