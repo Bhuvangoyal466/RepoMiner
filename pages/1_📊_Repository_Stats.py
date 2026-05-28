@@ -15,15 +15,7 @@ import pandas as pd
 import json
 from pathlib import Path
 from git import Repo
-from advanced_analytics import summarize_complexity_rows, summarize_language_insights
 from architecture_reports import build_report_bundle
-from coverage_import import (
-    coverage_summary,
-    load_coverage_from_repo,
-    map_coverage_to_repo,
-    parse_coverage_py_xml,
-    parse_lcov,
-)
 from ui import (
     apply_base_ui,
     render_sidebar_brand,
@@ -38,44 +30,6 @@ from ui import (
 def _rows_from_stats(stats: dict, key: str) -> list[dict]:
     rows = (stats.get(key) or []) if isinstance(stats, dict) else []
     return [row for row in rows if isinstance(row, dict)]
-
-
-def _coverage_rows_from_upload(uploaded_file) -> list[dict]:
-    if not uploaded_file:
-        return []
-
-    raw = uploaded_file.getvalue()
-    filename = (uploaded_file.name or "").lower()
-    try:
-        text = raw.decode("utf-8", errors="ignore")
-    except Exception:
-        text = ""
-
-    if filename.endswith(".xml"):
-        parsed = parse_coverage_py_xml(text)
-    else:
-        parsed = parse_lcov(text)
-
-    mapped = map_coverage_to_repo(Path("./cloned_repo"), parsed)
-    return [
-        {
-            "path": item.path,
-            "lines_covered": item.lines_covered,
-            "lines_total": item.lines_total,
-            "coverage_pct": item.coverage_pct,
-        }
-        for item in mapped
-    ]
-
-
-def _merge_coverage_rows(auto_rows: list[dict], uploaded_rows: list[dict]) -> list[dict]:
-    merged: dict[str, dict] = {}
-    for row in auto_rows + uploaded_rows:
-        path = str(row.get("path") or "")
-        if not path:
-            continue
-        merged[path] = row
-    return list(merged.values())
 
 
 # Page Configuration
@@ -499,87 +453,29 @@ elif st.session_state.get("repo_stats"):
         st.error(f"Dependency analysis failed: {e}")
 
     section_header(
-        "Advanced Analytics",
-        "Complexity, coverage, hotspots, and language signals",
-        "These metrics are pulled from the saved stats payload, with optional coverage imports layered in.",
+        "Language insights",
+        "Language composition",
+        "Languages detected during ingestion.",
     )
 
     repo_root = Path("./cloned_repo")
-    complexity_rows = _rows_from_stats(stats, "complexity_metrics")
-    complexity_summary = stats.get("complexity_summary") or summarize_complexity_rows(complexity_rows)
-    language_summary = stats.get("language_insights_summary") or summarize_language_insights(stats.get("language_insights") or {})
-    hotspot_timeline = (stats.get("hotspots_over_time") or {}).get("timeline") or {}
-    hotspot_rows = stats.get("hotspots") or []
+    language_summary = stats.get("language_insights_summary") or {}
 
-    auto_coverage_rows = (stats.get("coverage_import") or {}).get("files") or []
-    if not isinstance(auto_coverage_rows, list):
-        auto_coverage_rows = []
-    uploaded_coverage = st.file_uploader(
-        "Optional coverage report",
-        type=["xml", "info"],
-        help="Upload coverage.xml or lcov.info to layer test coverage into the report outputs.",
-        key="coverage_upload",
+    bundle = build_report_bundle(repo_root=repo_root, stats=stats)
+
+    render_info_card(
+        "Language insights",
+        f"Scanned {language_summary.get('files_scanned', 0)} files across {language_summary.get('language_count', 0)} languages. Dominant language: {language_summary.get('dominant_language') or 'N/A'}.",
+        accent="Stack",
     )
-    uploaded_coverage_rows = _coverage_rows_from_upload(uploaded_coverage)
-    coverage_rows = _merge_coverage_rows(auto_coverage_rows, uploaded_coverage_rows)
-    coverage_summary_data = coverage_summary(coverage_rows)
-
-    rag_eval_summary = {}
-    bundle = build_report_bundle(
-        repo_root=repo_root,
-        stats=stats,
-        complexity_rows=complexity_rows,
-        coverage_rows=coverage_rows,
-        hotspot_rows=hotspot_rows,
-        rag_eval_summary=rag_eval_summary,
-    )
-
-    metric_a, metric_b, metric_c, metric_d = st.columns(4)
-    with metric_a:
-        render_metric_card("Complex files", str(complexity_summary.get("files", 0)), "Files with computed complexity")
-    with metric_b:
-        render_metric_card("Avg CC", str(complexity_summary.get("cc_avg", "N/A")), "Average cyclomatic complexity")
-    with metric_c:
-        render_metric_card("Avg MI", str(complexity_summary.get("maintainability_index_avg", "N/A")), "Maintainability index average")
-    with metric_d:
-        render_metric_card("Coverage", f"{coverage_summary_data.get('coverage_pct', 0.0):.2f}%", "Imported test coverage")
-
-    analytics_left, analytics_right = st.columns(2)
-    with analytics_left:
-        render_info_card(
-            "Language insights",
-            f"Scanned {language_summary.get('files_scanned', 0)} files across {language_summary.get('language_count', 0)} languages. Dominant language: {language_summary.get('dominant_language') or 'N/A'}.",
-            accent="Stack",
-        )
-        if language_summary.get("language_counts"):
-            df_lang = pd.DataFrame(
-                list(language_summary["language_counts"].items()),
-                columns=["language", "count"],
-            ).set_index("language")
-            st.bar_chart(df_lang)
-        with st.expander("Language and extension details"):
-            st.json(language_summary)
-
-    with analytics_right:
-        render_info_card(
-            "Hotspots over time",
-            f"{(stats.get('hotspots_over_time') or {}).get('commits_scanned', 0)} commits scanned. The hottest files are surfaced below.",
-            accent="Churn",
-        )
-        if hotspot_timeline:
-            timeline_df = pd.Series(hotspot_timeline).sort_index()
-            st.line_chart(timeline_df)
-        elif hotspot_rows:
-            st.dataframe(pd.DataFrame(hotspot_rows)[["path", "complexity", "lines"]].head(10))
-
-    if complexity_rows:
-        st.dataframe(pd.DataFrame(complexity_rows).sort_values(["cc_max", "loc"], ascending=[False, False]).head(10))
-    else:
-        render_empty_state(
-            "No complexity data available",
-            "The current repository did not yield any computed complexity metrics.",
-            accent="Complexity",
-        )
+    if language_summary.get("language_counts"):
+        df_lang = pd.DataFrame(
+            list(language_summary["language_counts"].items()),
+            columns=["language", "count"],
+        ).set_index("language")
+        st.bar_chart(df_lang)
+    with st.expander("Language and extension details"):
+        st.json(language_summary)
 
     report_cols = st.columns(3)
     with report_cols[0]:

@@ -85,11 +85,11 @@ def build_import_graph(
             continue
         files.append(p)
 
-    rel_files = {str(p.relative_to(repo_root)).replace("\\\\", "/"): p for p in files}
+    rel_files = {str(p.relative_to(repo_root)).replace("\\", "/"): p for p in files}
 
     edges: List[Tuple[str, str]] = []
     for f in files:
-        rel = str(f.relative_to(repo_root)).replace("\\\\", "/")
+        rel = str(f.relative_to(repo_root)).replace("\\", "/")
         src = _safe_read_text(f)
         if not src.strip():
             continue
@@ -107,7 +107,7 @@ def build_import_graph(
                 for ext in ("", ".ts", ".tsx", ".js", ".jsx", ".py"):
                     candidate = (base / (imp + ext)).resolve()
                     try:
-                        rel_c = str(candidate.relative_to(repo_root)).replace("\\\\", "/")
+                        rel_c = str(candidate.relative_to(repo_root)).replace("\\", "/")
                         if rel_c in rel_files or (repo_root / rel_c).is_file():
                             target = rel_c
                             break
@@ -119,13 +119,71 @@ def build_import_graph(
     return edges
 
 
-def render_mermaid_import_graph(edges: List[Tuple[str, str]], *, max_edges: int = 800) -> str:
-    """Render a Mermaid flowchart."""
-    lines = ["flowchart LR"]
-    for i, (a, b) in enumerate(edges[:max_edges]):
-        lines.append(f"  \"{a}\" --> \"{b}\"")
-    if len(edges) > max_edges:
-        lines.append(f"  %% truncated: {len(edges) - max_edges} edges omitted")
+_ID_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_]")
+
+
+def _node_id(label: str, cache: Dict[str, str]) -> str:
+    if label in cache:
+        return cache[label]
+    base = _ID_SANITIZE_RE.sub("_", label).strip("_") or "n"
+    if base[0].isdigit():
+        base = "n_" + base
+    nid = base
+    i = 2
+    used = set(cache.values())
+    while nid in used:
+        nid = f"{base}_{i}"
+        i += 1
+    cache[label] = nid
+    return nid
+
+
+def render_mermaid_import_graph(
+    edges: List[Tuple[str, str]],
+    *,
+    max_edges: int = 250,
+    internal_only: bool = True,
+    known_files: Optional[Set[str]] = None,
+) -> str:
+    """Render a Mermaid flowchart with valid node IDs and deduplicated edges."""
+
+    lines: List[str] = ["flowchart LR"]
+
+    seen: Set[Tuple[str, str]] = set()
+    filtered: List[Tuple[str, str]] = []
+    for a, b in edges:
+        if a == b:
+            continue
+        if internal_only and known_files is not None and b not in known_files:
+            continue
+        key = (a, b)
+        if key in seen:
+            continue
+        seen.add(key)
+        filtered.append(key)
+
+    truncated = max(0, len(filtered) - max_edges)
+    filtered = filtered[:max_edges]
+
+    if not filtered:
+        lines.append("  empty[\"No internal imports detected\"]")
+        return "\n".join(lines) + "\n"
+
+    id_cache: Dict[str, str] = {}
+    declared: Set[str] = set()
+    for a, b in filtered:
+        for label in (a, b):
+            nid = _node_id(label, id_cache)
+            if nid not in declared:
+                safe_label = label.replace('"', "'")
+                lines.append(f"  {nid}[\"{safe_label}\"]")
+                declared.add(nid)
+
+    for a, b in filtered:
+        lines.append(f"  {id_cache[a]} --> {id_cache[b]}")
+
+    if truncated:
+        lines.append(f"  %% truncated: {truncated} edges omitted")
     return "\n".join(lines) + "\n"
 
 
@@ -133,7 +191,32 @@ def generate_architecture_mermaid(repo_root: Path, *, max_files: int = 300) -> s
     """Convenience wrapper that builds and renders the repository import graph."""
 
     edges = build_import_graph(repo_root, max_files=max_files)
-    return render_mermaid_import_graph(edges)
+    include_exts = {".py", ".js", ".jsx", ".ts", ".tsx"}
+    known_files: Set[str] = set()
+    module_to_file: Dict[str, str] = {}
+    for p in repo_root.rglob("*"):
+        if not p.is_file() or p.suffix.lower() not in include_exts:
+            continue
+        if _is_excluded(p, DEFAULT_EXCLUDES):
+            continue
+        rel = str(p.relative_to(repo_root)).replace("\\", "/")
+        known_files.add(rel)
+        mod_dotted = rel.rsplit(".", 1)[0].replace("/", ".")
+        module_to_file.setdefault(mod_dotted, rel)
+        module_to_file.setdefault(p.stem, rel)
+
+    resolved_edges: List[Tuple[str, str]] = []
+    for a, b in edges:
+        if b in known_files:
+            resolved_edges.append((a, b))
+            continue
+        top = b.split(".")[0]
+        if b in module_to_file:
+            resolved_edges.append((a, module_to_file[b]))
+        elif top in module_to_file:
+            resolved_edges.append((a, module_to_file[top]))
+
+    return render_mermaid_import_graph(resolved_edges, known_files=known_files)
 
 
 def _tree(repo_root: Path, depth: int = 2) -> str:
@@ -221,84 +304,140 @@ def _format_metric(value: Any) -> str:
     return str(value)
 
 
+def _detect_entrypoints(repo_root: Path) -> List[str]:
+    candidates = [
+        "main.py", "app.py", "manage.py", "run.py", "server.py",
+        "index.js", "index.ts", "src/index.tsx", "src/index.ts",
+        "src/main.ts", "src/main.tsx", "src/App.tsx",
+    ]
+    found: List[str] = []
+    for c in candidates:
+        if (repo_root / c).is_file():
+            found.append(c)
+    return found
+
+
+def _detect_stack(repo_root: Path) -> List[str]:
+    markers = {
+        "Python": "requirements.txt",
+        "Python (pyproject)": "pyproject.toml",
+        "Node.js": "package.json",
+        "TypeScript": "tsconfig.json",
+        "Docker": "Dockerfile",
+        "Docker Compose": "docker-compose.yml",
+        "Make": "Makefile",
+        "Poetry": "poetry.lock",
+        "Pipenv": "Pipfile",
+        "Go": "go.mod",
+        "Rust": "Cargo.toml",
+        "Java (Maven)": "pom.xml",
+        "Java (Gradle)": "build.gradle",
+    }
+    return [label for label, fname in markers.items() if (repo_root / fname).is_file()]
+
+
+def _module_breakdown(repo_root: Path, *, top_n: int = 10) -> List[Tuple[str, int]]:
+    counts: Dict[str, int] = {}
+    include_exts = {".py", ".js", ".jsx", ".ts", ".tsx"}
+    for p in repo_root.rglob("*"):
+        if not p.is_file() or p.suffix.lower() not in include_exts:
+            continue
+        if _is_excluded(p, DEFAULT_EXCLUDES):
+            continue
+        rel = p.relative_to(repo_root)
+        top = rel.parts[0] if len(rel.parts) > 1 else "(root)"
+        counts[top] = counts.get(top, 0) + 1
+    return sorted(counts.items(), key=lambda kv: -kv[1])[:top_n]
+
+
 def generate_summary_markdown(
     *,
     repo_name: str,
     repo_url: str,
+    repo_root: Path | None = None,
     stats: Dict[str, Any] | None = None,
-    complexity_rows: List[Dict[str, Any]] | None = None,
-    coverage_rows: List[Dict[str, Any]] | None = None,
-    hotspot_rows: List[Dict[str, Any]] | None = None,
-    rag_eval_summary: Dict[str, Any] | None = None,
     mermaid_diagram: str | None = None,
+    **_legacy: Any,
 ) -> str:
+    """Produce a concise, section-wise architecture report in Markdown."""
+
     stats = stats or {}
-    complexity_rows = complexity_rows or []
-    coverage_rows = coverage_rows or []
-    hotspot_rows = hotspot_rows or []
-    rag_eval_summary = rag_eval_summary or {}
 
-    def top(items: List[Dict[str, Any]], key: str, n: int = 8) -> List[Dict[str, Any]]:
-        return sorted(items, key=lambda r: (r.get(key) is None, -(r.get(key) or 0)))[:n]
+    language_summary = stats.get("language_insights_summary") or {}
+    dominant_lang = language_summary.get("dominant_language") or "N/A"
+    lang_counts = language_summary.get("language_counts") or {}
+    top_languages = sorted(lang_counts.items(), key=lambda kv: -kv[1])[:5] if isinstance(lang_counts, dict) else []
 
-    top_complex = top(complexity_rows, "cc_max", 8)
-    top_hot = top(hotspot_rows, "changed_lines", 8)
-
-    cov_avg = None
-    if coverage_rows:
-        vals = [r.get("coverage_pct") for r in coverage_rows if isinstance(r.get("coverage_pct"), (int, float))]
-        if vals:
-            cov_avg = sum(vals) / len(vals)
+    stack = _detect_stack(repo_root) if repo_root else []
+    entrypoints = _detect_entrypoints(repo_root) if repo_root else []
+    modules = _module_breakdown(repo_root) if repo_root else []
 
     lines: List[str] = []
+
+    # 1. Header
+    lines += [f"# Architecture Report — {repo_name}", ""]
+    if repo_url:
+        lines += [f"**Source:** {repo_url}", ""]
+
+    # 2. Overview
     lines += [
-        f"# RepoMiner Summary: {repo_name}",
+        "## 1. Overview",
         "",
-        f"URL: {repo_url}",
+        f"- **Files analyzed:** {stats.get('total_files', 'N/A')}",
+        f"- **Code chunks:** {stats.get('total_chunks', 'N/A')}",
+        f"- **Dominant language:** {dominant_lang}",
+        f"- **Languages detected:** {language_summary.get('language_count', len(top_languages))}",
         "",
-        "## Ingestion",
-        f"- Files: {stats.get('total_files', 'N/A')}",
-        f"- Chunks: {stats.get('total_chunks', 'N/A')}",
-        "",
-        "## Complexity",
     ]
-    if top_complex:
-        lines += ["| file | language | loc | cc_max | MI |", "|---|---:|---:|---:|---:|"]
-        for r in top_complex:
-            lines.append(f"| {r.get('file')} | {r.get('language')} | {r.get('loc')} | {r.get('cc_max')} | {r.get('maintainability_index')} |")
-    else:
-        lines += ["No complexity data."]
 
-    lines += ["", "## Coverage"]
-    if cov_avg is not None:
-        lines += [f"- Average: {cov_avg:.2f}%"]
+    # 3. Tech stack
+    lines += ["## 2. Tech Stack", ""]
+    if stack:
+        lines += [f"- {item}" for item in stack]
     else:
-        lines += ["No coverage imported."]
+        lines += ["No standard build/manifest files detected."]
+    lines += [""]
 
-    lines += ["", "## Evaluation"]
-    if rag_eval_summary:
+    # 4. Language composition
+    lines += ["## 3. Language Composition", ""]
+    if top_languages:
+        lines += ["| Language | Files |", "|---|---:|"]
+        lines += [f"| {lang} | {count} |" for lang, count in top_languages]
+    else:
+        lines += ["No language signal available."]
+    lines += [""]
+
+    # 5. Module structure
+    lines += ["## 4. Module Structure", "",
+              "Top-level directories by file count:", ""]
+    if modules:
+        lines += ["| Module | Files |", "|---|---:|"]
+        lines += [f"| {name} | {count} |" for name, count in modules]
+    else:
+        lines += ["No modules detected."]
+    lines += [""]
+
+    # 6. Entry points
+    lines += ["## 5. Entry Points", ""]
+    if entrypoints:
+        lines += [f"- `{ep}`" for ep in entrypoints]
+    else:
+        lines += ["No conventional entry points identified."]
+    lines += [""]
+
+    # 7. Architecture diagram
+    lines += ["## 6. Import Graph", ""]
+    if mermaid_diagram and mermaid_diagram.strip():
         lines += [
-            f"- Cases: {_format_metric(rag_eval_summary.get('cases'))}",
-            f"- Hit@k: {_format_metric(rag_eval_summary.get('hit_at_k'))}",
-            f"- MRR: {_format_metric(rag_eval_summary.get('mrr'))}",
-            f"- Precision@k: {_format_metric(rag_eval_summary.get('precision_at_k'))}",
-            f"- Recall@k: {_format_metric(rag_eval_summary.get('recall_at_k'))}",
-            f"- Avg retrieval latency (ms): {_format_metric(rag_eval_summary.get('avg_retrieval_ms'))}",
-            f"- P95 retrieval latency (ms): {_format_metric(rag_eval_summary.get('p95_retrieval_ms'))}",
+            "Internal module dependencies (truncated for readability):",
+            "",
+            "```mermaid",
+            mermaid_diagram.strip(),
+            "```",
         ]
     else:
-        lines += ["No RAG evaluation dataset imported."]
-
-    lines += ["", "## Hotspots (churn)"]
-    if top_hot:
-        lines += ["| file | commits | insertions | deletions | changed |", "|---|---:|---:|---:|---:|"]
-        for r in top_hot:
-            lines.append(f"| {r.get('file')} | {r.get('commits_touched')} | {r.get('insertions')} | {r.get('deletions')} | {r.get('changed_lines')} |")
-    else:
-        lines += ["No git history."]
-
-    if mermaid_diagram:
-        lines += ["", "## Architecture", "```mermaid", mermaid_diagram.strip(), "```"]
+        lines += ["No internal import edges detected."]
+    lines += [""]
 
     return "\n".join(lines) + "\n"
 
@@ -349,34 +488,24 @@ def build_report_bundle(
     *,
     repo_root: Path,
     stats: Dict[str, Any] | None = None,
-    complexity_rows: List[Dict[str, Any]] | None = None,
-    coverage_rows: List[Dict[str, Any]] | None = None,
-    hotspot_rows: List[Dict[str, Any]] | None = None,
-    rag_eval_summary: Dict[str, Any] | None = None,
+    **_legacy: Any,
 ) -> Dict[str, Any]:
     """Build the complete report artifact set used by the UI and exports."""
 
     stats = stats or {}
-    coverage_rows = coverage_rows or []
-    complexity_rows = complexity_rows or []
-    hotspot_rows = hotspot_rows or []
-    rag_eval_summary = rag_eval_summary or {}
 
     mermaid_diagram = generate_architecture_mermaid(repo_root)
     onboarding_markdown = generate_onboarding_markdown(repo_root, stats)
     summary_markdown = generate_summary_markdown(
         repo_name=stats.get("repo_name") or repo_root.name,
         repo_url=stats.get("repo_url") or "",
+        repo_root=repo_root,
         stats=stats,
-        complexity_rows=complexity_rows,
-        coverage_rows=coverage_rows,
-        hotspot_rows=hotspot_rows,
-        rag_eval_summary=rag_eval_summary,
         mermaid_diagram=mermaid_diagram,
     )
     summary_pdf = generate_summary_pdf(
         summary_markdown,
-        title=f"RepoMiner Summary - {stats.get('repo_name') or repo_root.name}",
+        title=f"Architecture Report - {stats.get('repo_name') or repo_root.name}",
     )
 
     return {

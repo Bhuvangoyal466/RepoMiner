@@ -36,14 +36,10 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from advanced_analytics import (
-    compute_complexity_metrics,
-    compute_hotspots_over_time,
     compute_language_insights,
-    summarize_complexity_rows,
     summarize_language_insights,
 )
 from architecture_reports import generate_architecture_mermaid
-from coverage_import import coverage_summary, load_coverage_from_repo
 
 # ==============================================================================
 # CONFIGURATION
@@ -71,6 +67,20 @@ CODE_EXTENSIONS = {
     ".md": None,  # Markdown uses fallback splitter
     ".txt": None,
 }
+
+# Add common C/C++ extensions so the GenericLoader will include them
+# Values map to a human-readable marker (parser auto-detection is used),
+# using simple strings/None to avoid depending on Language.CPP availability.
+CODE_EXTENSIONS.update({
+    ".c": "C",
+    ".h": "C",
+    ".cpp": "C++",
+    ".hpp": "C++",
+    ".cc": "C++",
+    ".cxx": "C++",
+    ".hh": "C++",
+    ".hxx": "C++",
+})
 
 # Image extensions for multimodal processing
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg"}
@@ -283,42 +293,6 @@ def _compute_contributors(repo_dir: str, limit: int = 10) -> List[Dict]:
     ]
 
 
-def _compute_hotspots(repo_dir: str, limit: int = 8) -> List[Dict]:
-    """Return the files touched by the most commits (a churn-based hotspot proxy).
-
-    The `complexity` field on each entry is the commit count for that file, which
-    the dashboard renders as the hotspot's intensity. `lines` is the file's
-    current line count on disk.
-    """
-    try:
-        repo = Repo(repo_dir)
-    except Exception:
-        return []
-
-    churn: Counter = Counter()
-    for commit in repo.iter_commits():
-        # commit.stats.files is a dict of {path: {insertions, deletions, lines}}
-        try:
-            for path in commit.stats.files.keys():
-                churn[path] += 1
-        except Exception:
-            continue
-
-    repo_root = Path(repo_dir)
-    hotspots: List[Dict] = []
-    for path, commits in churn.most_common(limit):
-        full = repo_root / path
-        line_count = 0
-        if full.exists() and full.is_file():
-            try:
-                with open(full, "r", encoding="utf-8", errors="ignore") as fh:
-                    line_count = sum(1 for _ in fh)
-            except Exception:
-                line_count = 0
-        hotspots.append({"path": path, "complexity": commits, "lines": line_count})
-    return hotspots
-
-
 def _compute_dependencies(repo_dir: str) -> List[Dict]:
     """Read declared dependencies from common manifest files.
 
@@ -440,7 +414,7 @@ def process_repository(github_url: str, persist_dir: str | None = None) -> Tuple
 
         # GitPython clone_from:
         # - Handles authentication for public repos automatically
-        # - By default we clone full history for accurate analytics (contributors, churn)
+        # - By default we clone full history for accurate analytics (contributors)
         # - For very large repos you can add depth=1 to speed up ingestion (less analytics)
         print(f"📥 Cloning repository: {github_url}")
         Repo.clone_from(github_url, to_path=CLONE_DIR)
@@ -624,24 +598,11 @@ def process_repository(github_url: str, persist_dir: str | None = None) -> Tuple
             stats["contributors"] = []
 
         try:
-            stats["hotspots"] = _compute_hotspots(CLONE_DIR)
-        except Exception:
-            stats["hotspots"] = []
-
-        try:
             stats["dependencies"] = _compute_dependencies(CLONE_DIR)
         except Exception:
             stats["dependencies"] = []
 
         repo_root = Path(CLONE_DIR)
-
-        try:
-            complexity_rows = compute_complexity_metrics(repo_root)
-            stats["complexity_metrics"] = complexity_rows
-            stats["complexity_summary"] = summarize_complexity_rows(complexity_rows)
-        except Exception:
-            stats["complexity_metrics"] = []
-            stats["complexity_summary"] = {}
 
         try:
             language_insights = compute_language_insights(repo_root)
@@ -650,28 +611,6 @@ def process_repository(github_url: str, persist_dir: str | None = None) -> Tuple
         except Exception:
             stats["language_insights"] = {}
             stats["language_insights_summary"] = {}
-
-        try:
-            stats["hotspots_over_time"] = compute_hotspots_over_time(repo_root)
-        except Exception:
-            stats["hotspots_over_time"] = {}
-
-        try:
-            coverage_rows = load_coverage_from_repo(repo_root)
-            stats["coverage_import"] = {
-                "summary": coverage_summary(coverage_rows),
-                "files": [
-                    {
-                        "path": row.path,
-                        "lines_covered": row.lines_covered,
-                        "lines_total": row.lines_total,
-                        "coverage_pct": row.coverage_pct,
-                    }
-                    for row in coverage_rows
-                ],
-            }
-        except Exception:
-            stats["coverage_import"] = {"summary": {}, "files": []}
 
         try:
             stats["architecture_mermaid"] = generate_architecture_mermaid(repo_root)
