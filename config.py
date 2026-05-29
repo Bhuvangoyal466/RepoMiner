@@ -75,6 +75,11 @@ def load_app_config() -> Dict[str, str | None]:
     else:
         os.environ.pop("OPENROUTER_API_KEY", None)
 
+    openrouter_base_url = os.getenv(
+        "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
+    )
+    os.environ.setdefault("OPENROUTER_BASE_URL", openrouter_base_url)
+
     if gemini_key and gemini_backups_enabled:
         os.environ.setdefault("GEMINI_API_KEY", gemini_key)
         os.environ.setdefault("GOOGLE_API_KEY", gemini_key)
@@ -90,9 +95,7 @@ def load_app_config() -> Dict[str, str | None]:
     return {
         "OPENROUTER_API_KEY": openrouter_key,
         "OPENROUTER_MODEL": os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-20b:free"),
-        "OPENROUTER_BASE_URL": os.getenv(
-            "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
-        ),
+        "OPENROUTER_BASE_URL": openrouter_base_url,
         "GROQ_API_KEY": groq_key,
         "GROQ_MODEL": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
         "ENABLE_GEMINI_BACKUP": "true" if gemini_backups_enabled else None,

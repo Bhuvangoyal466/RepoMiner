@@ -199,6 +199,37 @@ def process_image_with_vision(image_path: str) -> str:
     return simulated_description.strip()
 
 
+def _extract_notebook_text(file_path: Path) -> str:
+    """Convert a Jupyter notebook into plain text for indexing."""
+    try:
+        data = json.loads(file_path.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        return ""
+
+    cells = data.get("cells", []) if isinstance(data, dict) else []
+    extracted_parts: List[str] = []
+
+    for index, cell in enumerate(cells):
+        if not isinstance(cell, dict):
+            continue
+        cell_type = cell.get("cell_type", "")
+        source = cell.get("source", [])
+        if isinstance(source, list):
+            source_text = "".join(str(part) for part in source)
+        else:
+            source_text = str(source)
+        source_text = source_text.strip()
+        if not source_text:
+            continue
+
+        if cell_type == "markdown":
+            extracted_parts.append(f"[markdown cell {index + 1}]\n{source_text}")
+        elif cell_type == "code":
+            extracted_parts.append(f"[code cell {index + 1}]\n{source_text}")
+
+    return "\n\n".join(extracted_parts).strip()
+
+
 # ==============================================================================
 # REPOSITORY STATISTICS ANALYSIS
 # ==============================================================================
@@ -250,6 +281,7 @@ def get_repo_stats(documents: List[Document], images_processed: int) -> Dict:
         ".html": "HTML",
         ".htm": "HTML",
         ".md": "Markdown",
+        ".ipynb": "Jupyter Notebook",
     }
 
     # Language counts are by unique file so the donut reflects repo composition,
@@ -463,7 +495,7 @@ def process_repository(
         print(f"📄 Loaded {len(documents)} code chunks")
 
         # ======================================================================
-        # STAGE 3: PROCESS MARKDOWN & TEXT FILES
+        # STAGE 3: PROCESS MARKDOWN, TEXT, AND NOTEBOOK FILES
         # ======================================================================
 
         # For non-code files (README.md, docs), use RecursiveCharacterTextSplitter
@@ -500,7 +532,27 @@ def process_repository(
             except Exception as e:
                 print(f"⚠️ Skipping {file_path}: {e}")
 
-        print(f"📝 Total chunks after markdown: {len(documents)}")
+        notebook_files = list(Path(CLONE_DIR).rglob("*.ipynb"))
+        for file_path in notebook_files:
+            try:
+                content = _extract_notebook_text(file_path)
+                if content.strip():
+                    chunks = text_splitter.split_text(content)
+                    for i, chunk in enumerate(chunks):
+                        documents.append(
+                            Document(
+                                page_content=chunk,
+                                metadata={
+                                    "source": str(file_path.relative_to(CLONE_DIR)),
+                                    "chunk_id": i,
+                                    "type": "notebook",
+                                },
+                            )
+                        )
+            except Exception as e:
+                print(f"⚠️ Skipping notebook {file_path}: {e}")
+
+        print(f"📝 Total chunks after text files and notebooks: {len(documents)}")
 
         # ======================================================================
         # STAGE 4: MULTIMODAL - Process Images (DISABLED)

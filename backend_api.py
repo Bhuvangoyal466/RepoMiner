@@ -792,7 +792,9 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
 
         # 1) OpenRouter via OpenAI-compatible API
         openrouter_key = os.getenv("OPENROUTER_API_KEY")
-        openrouter_base = os.getenv("OPENROUTER_BASE_URL")
+        openrouter_base = (
+            os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
+        )
         openrouter_model = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-20b:free")
         if openrouter_key:
             logger.info(
@@ -801,11 +803,7 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
                 openrouter_base,
             )
             try:
-                client = (
-                    openai.OpenAI(api_key=openrouter_key, base_url=openrouter_base)
-                    if openrouter_base
-                    else openai.OpenAI(api_key=openrouter_key)
-                )
+                client = openai.OpenAI(api_key=openrouter_key, base_url=openrouter_base)
                 resp = client.chat.completions.create(
                     model=openrouter_model,
                     messages=messages,
