@@ -34,7 +34,7 @@ export default function NavRail({ user, onLogout, onLogin }: NavRailProps){
   return (
     <aside className="w-64 min-w-[64px] p-4 bg-transparent border-r border-white/6 flex flex-col gap-5">
       <div className="rounded-2xl border border-white/8 bg-white/4 p-4 shadow-soft-lg">
-        <div className="text-lg font-semibold text-white">CodeMiner</div>
+        <div className="text-lg font-semibold text-white">RepoMiner</div>
         <div className="mt-1 text-xs text-muted">Code intelligence workspace</div>
         <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent-2">
           <span className="h-1.5 w-1.5 rounded-full bg-accent-2" />

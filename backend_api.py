@@ -26,11 +26,11 @@ from config import load_app_config
 _APP_CONFIG = load_app_config()
 
 logging.basicConfig(
-    level=os.getenv("CODEMINER_LOG_LEVEL", "INFO"),
+    level=os.getenv("REPOMINER_LOG_LEVEL", "INFO"),
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     stream=sys.stdout,
 )
-logger = logging.getLogger("codeminer.backend")
+logger = logging.getLogger("repominer.backend")
 logger.info(
     "Provider keys loaded: openrouter=%s gemini=%s groq=%s",
     bool(_APP_CONFIG.get("OPENROUTER_API_KEY")),
@@ -72,9 +72,9 @@ except Exception:
 
 app = FastAPI()
 
-SESSION_COOKIE_NAME = "codeminer_session"
-GITHUB_STATE_COOKIE = "codeminer_github_state"
-GITHUB_NEXT_COOKIE = "codeminer_github_next"
+SESSION_COOKIE_NAME = "repominer_session"
+GITHUB_STATE_COOKIE = "repominer_github_state"
+GITHUB_NEXT_COOKIE = "repominer_github_next"
 
 
 class LoginRequest(BaseModel):
@@ -94,9 +94,7 @@ def _github_redirect_uri() -> str:
 
 
 def _auth_secret() -> bytes:
-    return os.getenv("CODEMINER_SESSION_SECRET", "codeminer-dev-secret").encode(
-        "utf-8"
-    )
+    return os.getenv("REPOMINER_SESSION_SECRET", "repominer-dev-secret").encode("utf-8")
 
 
 def _cookie_secure() -> bool:
@@ -268,7 +266,11 @@ def api_auth_github_start(next: str = "/"):
     if not _github_enabled():
         raise HTTPException(status_code=503, detail="GitHub OAuth is not configured")
 
-    safe_next = next if isinstance(next, str) and next.startswith("/") and not next.startswith("//") else "/"
+    safe_next = (
+        next
+        if isinstance(next, str) and next.startswith("/") and not next.startswith("//")
+        else "/"
+    )
 
     state = secrets.token_urlsafe(24)
     params = urlencode(
@@ -330,7 +332,10 @@ def api_auth_github_callback(
 
         user_response = requests.get(
             "https://api.github.com/user",
-            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.github+json"},
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/vnd.github+json",
+            },
             timeout=20,
         )
         user_response.raise_for_status()
@@ -340,7 +345,10 @@ def api_auth_github_callback(
         if not email:
             emails_response = requests.get(
                 "https://api.github.com/user/emails",
-                headers={"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.github+json"},
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/vnd.github+json",
+                },
                 timeout=20,
             )
             if emails_response.ok:
@@ -359,7 +367,9 @@ def api_auth_github_callback(
         )
 
         next_path = request.cookies.get(GITHUB_NEXT_COOKIE) or "/"
-        response = RedirectResponse(url=f"{_frontend_url().rstrip('/')}{next_path}", status_code=302)
+        response = RedirectResponse(
+            url=f"{_frontend_url().rstrip('/')}{next_path}", status_code=302
+        )
         _set_auth_cookie(response, _issue_token(user["id"]))
         _clear_state_cookie(response)
         _clear_next_cookie(response)
@@ -381,33 +391,38 @@ class ProcessRequest(BaseModel):
     repoUrl: str
 
 
-@app.get('/api/sessions')
+@app.get("/api/sessions")
 def api_list_sessions(request: Request):
     user = _require_user(request)
     sessions = list_sessions(user_id=user["id"])
     # normalize keys to frontend expectations
     out = []
     for s in sessions:
-        out.append({
-            'id': s.get('session_id'),
-            'repoUrl': s.get('repo_url'),
-            'repoName': s.get('repo_name'),
-            'updatedAt': s.get('updated_at'),
-            'messageCount': s.get('message_count', 0),
-        })
+        out.append(
+            {
+                "id": s.get("session_id"),
+                "repoUrl": s.get("repo_url"),
+                "repoName": s.get("repo_name"),
+                "updatedAt": s.get("updated_at"),
+                "messageCount": s.get("message_count", 0),
+            }
+        )
     return out
 
 
 def _user_scoped_session_id(user_id: str, repo_name: str, repo_url: str) -> str:
     """Build a session_id namespaced to the user so two users analyzing the same repo
     do not overwrite each other's session file or vectorstore snapshot."""
-    base = repo_name or (repo_url.rstrip('/').split('/')[-1] if repo_url else 'repo')
-    safe_base = ''.join(ch if ch.isalnum() or ch in '-_' else '_' for ch in base).strip('_') or 'repo'
-    user_tag = hashlib.sha256((user_id or 'anon').encode('utf-8')).hexdigest()[:8]
+    base = repo_name or (repo_url.rstrip("/").split("/")[-1] if repo_url else "repo")
+    safe_base = (
+        "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in base).strip("_")
+        or "repo"
+    )
+    user_tag = hashlib.sha256((user_id or "anon").encode("utf-8")).hexdigest()[:8]
     return f"u{user_tag}-{safe_base}"
 
 
-@app.post('/api/process')
+@app.post("/api/process")
 def api_process(req: ProcessRequest, request: Request):
     user = _require_user(request)
     repo = req.repoUrl
@@ -416,15 +431,15 @@ def api_process(req: ProcessRequest, request: Request):
     # per-session vectorstore directory. Writing to a session-scoped path
     # avoids the SQLITE_READONLY_DBMOVED race where a stale Chroma connection
     # to ./chroma_db (held by an in-flight chat request) blocks the writer.
-    repo_name_guess = repo.rstrip('/').split('/')[-1] if repo else 'repo'
+    repo_name_guess = repo.rstrip("/").split("/")[-1] if repo else "repo"
     scoped_session_id = _user_scoped_session_id(user["id"], repo_name_guess, repo)
     session_dir = session_vectorstore_dir(scoped_session_id)
 
     success, stats = process_repository(repo, persist_dir=session_dir)
     if not success:
-        raise HTTPException(status_code=500, detail='Processing failed')
+        raise HTTPException(status_code=500, detail="Processing failed")
 
-    repo_name = stats.get('repo_name') or repo_name_guess
+    repo_name = stats.get("repo_name") or repo_name_guess
     session_id = save_session(
         repo_name,
         repo,
@@ -435,20 +450,20 @@ def api_process(req: ProcessRequest, request: Request):
         session_id=scoped_session_id,
     )
     set_current_session(user["id"], session_id)
-    return {'sessionId': session_id, 'stats': stats}
+    return {"sessionId": session_id, "stats": stats}
 
 
-@app.get('/api/sessions/{session_id}')
+@app.get("/api/sessions/{session_id}")
 def api_get_session(session_id: str, request: Request):
     user = _require_user(request)
     session_id = _resolve_session_id(session_id, user["id"])
     payload = load_session(session_id, user_id=user["id"])
     if not payload:
-        raise HTTPException(status_code=404, detail='Session not found')
+        raise HTTPException(status_code=404, detail="Session not found")
     return payload
 
 
-@app.delete('/api/sessions/{session_id}')
+@app.delete("/api/sessions/{session_id}")
 def api_delete_session(session_id: str, request: Request):
     user = _require_user(request)
     session_id = _resolve_session_id(session_id, user["id"])
@@ -458,54 +473,58 @@ def api_delete_session(session_id: str, request: Request):
         user["id"],
         remaining_sessions[0].get("session_id") if remaining_sessions else None,
     )
-    return {'ok': True}
+    return {"ok": True}
 
 
-@app.post('/api/sessions/{session_id}/activate')
+@app.post("/api/sessions/{session_id}/activate")
 def api_activate_session(session_id: str, request: Request):
     user = _require_user(request)
     session_id = _resolve_session_id(session_id, user["id"])
     payload = load_session(session_id, user_id=user["id"])
     if not payload:
-        raise HTTPException(status_code=404, detail='Session not found')
+        raise HTTPException(status_code=404, detail="Session not found")
     set_current_session(user["id"], session_id)
-    return {'ok': True, 'sessionId': session_id}
+    return {"ok": True, "sessionId": session_id}
 
 
-@app.get('/api/sessions/{session_id}/stats')
+@app.get("/api/sessions/{session_id}/stats")
 def api_get_stats(session_id: str, request: Request):
     user = _require_user(request)
     session_id = _resolve_session_id(session_id, user["id"])
     payload = load_session(session_id, user_id=user["id"])
     if not payload:
-        raise HTTPException(status_code=404, detail='Session not found')
-    return payload.get('repo_stats', {})
+        raise HTTPException(status_code=404, detail="Session not found")
+    return payload.get("repo_stats", {})
 
 
-@app.get('/api/sessions/{session_id}/reports')
+@app.get("/api/sessions/{session_id}/reports")
 def api_get_reports(session_id: str, request: Request):
     user = _require_user(request)
     session_id = _resolve_session_id(session_id, user["id"])
     payload = load_session(session_id, user_id=user["id"])
     if not payload:
-        raise HTTPException(status_code=404, detail='Session not found')
+        raise HTTPException(status_code=404, detail="Session not found")
 
-    stats = payload.get('repo_stats') or {}
-    repo_root = Path('./cloned_repo')
+    stats = payload.get("repo_stats") or {}
+    repo_root = Path("./cloned_repo")
 
     bundle = build_report_bundle(repo_root=repo_root, stats=stats)
 
-    pdf_bytes = bundle.get('summary_pdf') or b''
+    pdf_bytes = bundle.get("summary_pdf") or b""
     return {
-        'summaryMarkdown': bundle.get('summary_markdown') or '',
-        'onboardingMarkdown': bundle.get('onboarding_markdown') or '',
-        'architectureMermaid': bundle.get('mermaid_diagram') or '',
-        'summaryPdfBase64': base64.b64encode(pdf_bytes).decode('utf-8') if pdf_bytes else None,
+        "summaryMarkdown": bundle.get("summary_markdown") or "",
+        "onboardingMarkdown": bundle.get("onboarding_markdown") or "",
+        "architectureMermaid": bundle.get("mermaid_diagram") or "",
+        "summaryPdfBase64": (
+            base64.b64encode(pdf_bytes).decode("utf-8") if pdf_bytes else None
+        ),
     }
 
 
-@app.get('/api/sessions/{session_id}/chunks')
-def api_get_chunks(session_id: str, request: Request, page: int = 1, per_page: int = 20):
+@app.get("/api/sessions/{session_id}/chunks")
+def api_get_chunks(
+    session_id: str, request: Request, page: int = 1, per_page: int = 20
+):
     """Return paginated chunks from the session's per-session Chroma store.
 
     Opens the session's own persist directory directly and returns documents with
@@ -516,10 +535,14 @@ def api_get_chunks(session_id: str, request: Request, page: int = 1, per_page: i
     session_id = _resolve_session_id(session_id, user["id"])
     session = load_session(session_id, user_id=user["id"])
     if not session:
-        raise HTTPException(status_code=404, detail='Session not found')
+        raise HTTPException(status_code=404, detail="Session not found")
 
     session_dir = session_vectorstore_dir(session_id)
-    if not (os.path.exists(session_dir) and os.listdir(session_dir)) or HuggingFaceEmbeddings is None or Chroma is None:
+    if (
+        not (os.path.exists(session_dir) and os.listdir(session_dir))
+        or HuggingFaceEmbeddings is None
+        or Chroma is None
+    ):
         return {"chunks": [], "page": page, "per_page": per_page, "total": 0}
 
     try:
@@ -528,12 +551,16 @@ def api_get_chunks(session_id: str, request: Request, page: int = 1, per_page: i
             model_kwargs={"device": "cpu"},
             encode_kwargs={"normalize_embeddings": True},
         )
-        vectorstore = Chroma(persist_directory=session_dir, embedding_function=embeddings)
+        vectorstore = Chroma(
+            persist_directory=session_dir, embedding_function=embeddings
+        )
 
         # Attempt to read all stored documents from the underlying collection
         docs_result = {}
         try:
-            docs_result = vectorstore._collection.get(include=["documents", "metadatas"])
+            docs_result = vectorstore._collection.get(
+                include=["documents", "metadatas"]
+            )
         except Exception:
             # Fallback to vectorstore.get if available
             try:
@@ -546,8 +573,15 @@ def api_get_chunks(session_id: str, request: Request, page: int = 1, per_page: i
         metadatas = docs_result.get("metadatas") or []
         for i, doc_text in enumerate(docs_list):
             meta = metadatas[i] if i < len(metadatas) else {}
-            src = meta.get("source") or meta.get("source_path") or meta.get("path") or "unknown"
-            documents.append({"id": f"chunk-{i}", "path": src, "content": doc_text, "score": None})
+            src = (
+                meta.get("source")
+                or meta.get("source_path")
+                or meta.get("path")
+                or "unknown"
+            )
+            documents.append(
+                {"id": f"chunk-{i}", "path": src, "content": doc_text, "score": None}
+            )
 
         total = len(documents)
         start = (page - 1) * per_page
@@ -589,7 +623,7 @@ def api_get_chunks(session_id: str, request: Request, page: int = 1, per_page: i
         raise HTTPException(status_code=500, detail="Failed to list chunks")
 
 
-@app.post('/api/sessions/{session_id}/chat')
+@app.post("/api/sessions/{session_id}/chat")
 def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
     """Perform a similarity search against the session vectorstore snapshot and return a concise grounded answer.
 
@@ -600,21 +634,21 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
     session_id = _resolve_session_id(session_id, user["id"])
     session = load_session(session_id, user_id=user["id"])
     if not session:
-        raise HTTPException(status_code=404, detail='Session not found')
+        raise HTTPException(status_code=404, detail="Session not found")
 
     prompt = None
     history_payload: list = []
     if isinstance(body, dict):
-        prompt = body.get('prompt')
-        k = int(body.get('k', 6))
-        raw_history = body.get('history') or []
+        prompt = body.get("prompt")
+        k = int(body.get("k", 6))
+        raw_history = body.get("history") or []
         if isinstance(raw_history, list):
             history_payload = raw_history
     else:
         k = 6
 
     if not prompt:
-        raise HTTPException(status_code=400, detail='Missing prompt')
+        raise HTTPException(status_code=400, detail="Missing prompt")
 
     # Normalize prior turns into OpenAI-style messages. Accept either
     # {role: "user"|"assistant"|"human"|"ai", text|content: "..."}.
@@ -623,14 +657,14 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
         for item in items[-max_turns:]:
             if not isinstance(item, dict):
                 continue
-            role = (item.get('role') or '').lower()
-            content = item.get('text') or item.get('content') or ''
+            role = (item.get("role") or "").lower()
+            content = item.get("text") or item.get("content") or ""
             if not isinstance(content, str) or not content.strip():
                 continue
-            if role in ('user', 'human'):
-                normalized.append({'role': 'user', 'content': content.strip()})
-            elif role in ('assistant', 'ai', 'bot'):
-                normalized.append({'role': 'assistant', 'content': content.strip()})
+            if role in ("user", "human"):
+                normalized.append({"role": "user", "content": content.strip()})
+            elif role in ("assistant", "ai", "bot"):
+                normalized.append({"role": "assistant", "content": content.strip()})
         return normalized
 
     history_messages = _normalize_history(history_payload)
@@ -638,14 +672,21 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
     sources = []
     session_dir = session_vectorstore_dir(session_id)
 
-    if os.path.exists(session_dir) and os.listdir(session_dir) and HuggingFaceEmbeddings is not None and Chroma is not None:
+    if (
+        os.path.exists(session_dir)
+        and os.listdir(session_dir)
+        and HuggingFaceEmbeddings is not None
+        and Chroma is not None
+    ):
         try:
             embeddings = HuggingFaceEmbeddings(
                 model_name="all-MiniLM-L6-v2",
                 model_kwargs={"device": "cpu"},
                 encode_kwargs={"normalize_embeddings": True},
             )
-            vectorstore = Chroma(persist_directory=session_dir, embedding_function=embeddings)
+            vectorstore = Chroma(
+                persist_directory=session_dir, embedding_function=embeddings
+            )
             docs_and_scores = vectorstore.similarity_search_with_score(prompt, k=k)
             for i, (doc, score) in enumerate(docs_and_scores):
                 sources.append(
@@ -661,6 +702,7 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
 
     # Try to call the configured provider with a compact retrieved context bundle.
     reply_text = None
+
     # Provider fallback sequence: OpenRouter -> Groq -> Gemini
     def _extract_text_response(result):
         if result is None:
@@ -669,7 +711,7 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
             text = result.strip()
             return text or None
 
-        content = getattr(result, 'content', None)
+        content = getattr(result, "content", None)
         if isinstance(content, str):
             text = content.strip()
             if text:
@@ -680,10 +722,12 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
                     pieces = []
                     for part in content:
                         if isinstance(part, dict):
-                            pieces.append(str(part.get('text') or part.get('content') or ''))
+                            pieces.append(
+                                str(part.get("text") or part.get("content") or "")
+                            )
                         else:
                             pieces.append(str(part))
-                    text = ''.join(pieces).strip()
+                    text = "".join(pieces).strip()
                     if text:
                         return text
             except Exception:
@@ -693,49 +737,53 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
                 return text
 
         if isinstance(result, dict):
-            choices = result.get('choices')
+            choices = result.get("choices")
             if choices:
                 try:
-                    message = choices[0].get('message') if isinstance(choices[0], dict) else None
+                    message = (
+                        choices[0].get("message")
+                        if isinstance(choices[0], dict)
+                        else None
+                    )
                     if isinstance(message, dict):
-                        text = (message.get('content') or '').strip()
+                        text = (message.get("content") or "").strip()
                         if text:
                             return text
                 except Exception:
                     pass
 
-            text = (result.get('text') or result.get('output_text') or '').strip()
+            text = (result.get("text") or result.get("output_text") or "").strip()
             if text:
                 return text
 
-        choices = getattr(result, 'choices', None)
+        choices = getattr(result, "choices", None)
         if choices:
             try:
                 choice = choices[0]
-                message = getattr(choice, 'message', None)
+                message = getattr(choice, "message", None)
                 if message is not None:
-                    text = getattr(message, 'content', None)
+                    text = getattr(message, "content", None)
                     if isinstance(text, str) and text.strip():
                         return text.strip()
-                text = getattr(choice, 'text', None)
+                text = getattr(choice, "text", None)
                 if isinstance(text, str) and text.strip():
                     return text.strip()
             except Exception:
                 pass
 
-        generations = getattr(result, 'generations', None)
+        generations = getattr(result, "generations", None)
         if generations:
             try:
                 for generation_group in generations:
                     for generation in generation_group:
-                        text = getattr(generation, 'text', None)
+                        text = getattr(generation, "text", None)
                         if isinstance(text, str) and text.strip():
                             return text.strip()
             except Exception:
                 pass
 
         text = str(result).strip()
-        if text and text not in {'{}', '[]'}:
+        if text and text not in {"{}", "[]"}:
             return text
         return None
 
@@ -747,10 +795,23 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
         openrouter_base = os.getenv("OPENROUTER_BASE_URL")
         openrouter_model = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-20b:free")
         if openrouter_key:
-            logger.info("Trying OpenRouter (model=%s base=%s)", openrouter_model, openrouter_base)
+            logger.info(
+                "Trying OpenRouter (model=%s base=%s)",
+                openrouter_model,
+                openrouter_base,
+            )
             try:
-                client = openai.OpenAI(api_key=openrouter_key, base_url=openrouter_base) if openrouter_base else openai.OpenAI(api_key=openrouter_key)
-                resp = client.chat.completions.create(model=openrouter_model, messages=messages, temperature=0.2, max_tokens=8192)
+                client = (
+                    openai.OpenAI(api_key=openrouter_key, base_url=openrouter_base)
+                    if openrouter_base
+                    else openai.OpenAI(api_key=openrouter_key)
+                )
+                resp = client.chat.completions.create(
+                    model=openrouter_model,
+                    messages=messages,
+                    temperature=0.2,
+                    max_tokens=8192,
+                )
                 text = _extract_text_response(resp)
                 if text:
                     logger.info("OpenRouter returned %d chars", len(text))
@@ -772,8 +833,17 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
             try:
                 from langchain_groq import ChatGroq
 
-                groq_llm = ChatGroq(model=groq_model, groq_api_key=groq_key, temperature=0.2, max_tokens=8192)
-                result = groq_llm.invoke(messages) if hasattr(groq_llm, "invoke") else groq_llm(messages)
+                groq_llm = ChatGroq(
+                    model=groq_model,
+                    groq_api_key=groq_key,
+                    temperature=0.2,
+                    max_tokens=8192,
+                )
+                result = (
+                    groq_llm.invoke(messages)
+                    if hasattr(groq_llm, "invoke")
+                    else groq_llm(messages)
+                )
                 text = _extract_text_response(result)
                 if text:
                     logger.info("Groq returned %d chars", len(text))
@@ -789,14 +859,25 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
 
         # 3) Gemini via langchain_google_genai if available
         gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        gemini_model = os.getenv("GEMINI_MODEL_PRO") or os.getenv("GEMINI_MODEL_FLASH", "gemini-2.5-pro")
+        gemini_model = os.getenv("GEMINI_MODEL_PRO") or os.getenv(
+            "GEMINI_MODEL_FLASH", "gemini-2.5-pro"
+        )
         if gemini_key:
             logger.info("Trying Gemini (model=%s)", gemini_model)
             try:
                 from langchain_google_genai import ChatGoogleGenerativeAI
 
-                gemini_llm = ChatGoogleGenerativeAI(model=gemini_model, google_api_key=gemini_key, temperature=0.2, max_output_tokens=8192)
-                out = gemini_llm.invoke(messages) if hasattr(gemini_llm, "invoke") else gemini_llm(messages)
+                gemini_llm = ChatGoogleGenerativeAI(
+                    model=gemini_model,
+                    google_api_key=gemini_key,
+                    temperature=0.2,
+                    max_output_tokens=8192,
+                )
+                out = (
+                    gemini_llm.invoke(messages)
+                    if hasattr(gemini_llm, "invoke")
+                    else gemini_llm(messages)
+                )
                 text = _extract_text_response(out)
                 if text:
                     logger.info("Gemini returned %d chars", len(text))
@@ -834,11 +915,15 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
         )
         context_lines = []
         for source in sources:
-            content = source['content'].strip().replace('\r\n', '\n')
+            content = source["content"].strip().replace("\r\n", "\n")
             context_lines.append(
                 f"File: {source['path']}\nSimilarity: {source['score']:.4f}\nContent:\n{content}"
             )
-        context_text = "\n\n---\n\n".join(context_lines) if context_lines else "No relevant context retrieved."
+        context_text = (
+            "\n\n---\n\n".join(context_lines)
+            if context_lines
+            else "No relevant context retrieved."
+        )
         system_message = qa_system_prompt.replace("{context}", context_text)
 
         messages = [{"role": "system", "content": system_message}]
@@ -847,7 +932,10 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
 
         logger.info(
             "Calling LLM provider chain (prompt_len=%d, sources=%d, history_turns=%d, context_chars=%d)",
-            len(prompt), len(sources), len(history_messages), len(context_text),
+            len(prompt),
+            len(sources),
+            len(history_messages),
+            len(context_text),
         )
         reply_text = call_providers_with_fallback(messages)
     except Exception:
@@ -864,7 +952,9 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
                 "Check the backend logs for the provider chain errors."
             )
         else:
-            reply_text = "I could not find relevant repository context for that question."
+            reply_text = (
+                "I could not find relevant repository context for that question."
+            )
 
     created_at = datetime.utcnow().isoformat()
     user_message_id = "msg-" + secrets.token_hex(6)
@@ -875,21 +965,25 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
     # (Streamlit) so either client can render it.
     try:
         prior_messages = list(session.get("messages") or [])
-        prior_messages.append({
-            "id": user_message_id,
-            "role": "user",
-            "text": prompt,
-            "content": prompt,
-            "createdAt": created_at,
-        })
-        prior_messages.append({
-            "id": assistant_message_id,
-            "role": "assistant",
-            "text": reply_text,
-            "content": reply_text,
-            "createdAt": created_at,
-            "sources": sources,
-        })
+        prior_messages.append(
+            {
+                "id": user_message_id,
+                "role": "user",
+                "text": prompt,
+                "content": prompt,
+                "createdAt": created_at,
+            }
+        )
+        prior_messages.append(
+            {
+                "id": assistant_message_id,
+                "role": "assistant",
+                "text": reply_text,
+                "content": reply_text,
+                "createdAt": created_at,
+                "sources": sources,
+            }
+        )
         save_session(
             repo_name=session.get("repo_name") or "repo",
             repo_url=session.get("repo_url") or "",
@@ -911,5 +1005,5 @@ def api_chat(session_id: str, request: Request, body: Dict[str, Any]):
     }
 
 
-if __name__ == '__main__':
-    uvicorn.run(app, host='127.0.0.1', port=8000)
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8000)

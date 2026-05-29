@@ -54,14 +54,14 @@ from ui import (
 
 # Page Configuration (must be first Streamlit command)
 st.set_page_config(
-    page_title="CodeMiner Chatbot",
+    page_title="RepoMiner Chatbot",
     page_icon="💬",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 apply_base_ui()
-render_sidebar_brand("CodeMiner", "Repository intelligence workspace")
+render_sidebar_brand("RepoMiner", "Repository intelligence workspace")
 
 APP_CONFIG = load_app_config()
 try:
@@ -188,7 +188,9 @@ def load_rag_pipeline(
         try:
             chain, store = _build_rag_chain(llm)
         except Exception as exc:
-            logging.exception("Failed to build RAG chain for provider %s: %s", model_name, exc)
+            logging.exception(
+                "Failed to build RAG chain for provider %s: %s", model_name, exc
+            )
             return
         if vectorstore is None:
             vectorstore = store
@@ -217,7 +219,9 @@ def load_rag_pipeline(
     gemini_pro_llm = None
     if _google_api_key and ENABLE_GEMINI_BACKUP:
         try:
-            logging.info("Attempting to initialize Gemini flash model: %s", _gemini_model_flash)
+            logging.info(
+                "Attempting to initialize Gemini flash model: %s", _gemini_model_flash
+            )
             gemini_flash_llm = ChatGoogleGenerativeAI(
                 model=_gemini_model_flash,
                 temperature=0.2,
@@ -229,7 +233,9 @@ def load_rag_pipeline(
             logging.exception("Gemini flash init failed: %s", exc)
 
         try:
-            logging.info("Attempting to initialize Gemini pro model: %s", _gemini_model_pro)
+            logging.info(
+                "Attempting to initialize Gemini pro model: %s", _gemini_model_pro
+            )
             gemini_pro_llm = ChatGoogleGenerativeAI(
                 model=_gemini_model_pro,
                 temperature=0.2,
@@ -405,7 +411,7 @@ if st.session_state.current_session_id is None:
 
 st.sidebar.title("Workspace")
 st.sidebar.caption(
-    "CodeMiner control panel for repository input, sessions, and chat settings."
+    "RepoMiner control panel for repository input, sessions, and chat settings."
 )
 st.sidebar.markdown("---")
 
@@ -572,7 +578,7 @@ if st.session_state.repo_processed and st.session_state.messages:
 
 render_hero(
     "Repository Q&A",
-    "CodeMiner Chatbot",
+    "RepoMiner Chatbot",
     "Ask grounded questions about a processed repository. Keep queries specific to files, functions, or system behavior.",
 )
 render_pill_row(

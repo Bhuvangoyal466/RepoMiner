@@ -1,4 +1,4 @@
-# 🤖 CodeMiner - RAG GitHub Repository Chatbot
+# 🤖 RepoMiner - RAG GitHub Repository Chatbot
 
 An intelligent code analysis chatbot that uses **Retrieval-Augmented Generation (RAG)** to answer questions about any GitHub repository. Built with Python, Streamlit, LangChain, ChromaDB, and Google Gemini AI.
 
@@ -11,9 +11,6 @@ An intelligent code analysis chatbot that uses **Retrieval-Augmented Generation 
 ---
 
 ## 📖 Table of Contents
-
-
----
 
 ## 🎯 Features
 
@@ -32,8 +29,8 @@ An intelligent code analysis chatbot that uses **Retrieval-Augmented Generation 
 - **Documentation**: `.md`, `.txt`
 - **Images**: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`
 
-### Session Management
-- Each analyzed repo is stored locally in `.codeminer_state/`
+-### Session Management
+- Each analyzed repo is stored locally in `.repominer_state/`
 - The app restores the last active repository automatically on launch
 - Use the chatbot sidebar to switch between previously analyzed repositories
 
@@ -57,8 +54,8 @@ An intelligent code analysis chatbot that uses **Retrieval-Augmented Generation 
 
 #### 1. Clone the Repository
 ```bash
-git clone https://github.com/yourusername/codeminer.git
-cd codeminer
+git clone https://github.com/yourusername/repominer.git
+cd repominer
 ```
 
 #### 2. Install Dependencies
@@ -79,7 +76,7 @@ OPENROUTER_API_KEY=your_openrouter_api_key_here
 GROQ_API_KEY=your_groq_api_key_here
 
 # Auth
-CODEMINER_SESSION_SECRET=change_me_to_a_long_random_secret
+REPOMINER_SESSION_SECRET=change_me_to_a_long_random_secret
 GITHUB_CLIENT_ID=your_github_oauth_client_id
 GITHUB_CLIENT_SECRET=your_github_oauth_client_secret
 GITHUB_OAUTH_REDIRECT_URI=http://127.0.0.1:5173/api/auth/github/callback
@@ -163,7 +160,7 @@ Return Answer with Code References
 ## 📁 Project Structure
 
 ```
-codeminer/
+repominer/
 │
 ├── app.py                          # Main Streamlit application entry point
 ├── config.py                       # Configuration and environment setup
@@ -183,7 +180,7 @@ codeminer/
 ├── .gitignore                      # Git ignore rules
 │
 ├── .streamlit/                     # Streamlit configuration (auto-generated)
-├── .codeminer_state/               # Session storage (auto-generated)
+├── .repominer_state/               # Session storage (auto-generated)
 └── __pycache__/                    # Python cache (auto-generated)
 ```
 
@@ -373,8 +370,8 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/codeminer.git
-cd codeminer
+git clone https://github.com/yourusername/repominer.git
+cd repominer
 
 # Create virtual environment
 python -m venv venv

@@ -1,4 +1,4 @@
-"""Persistent user auth state for CodeMiner."""
+"""Persistent user auth state for RepoMiner."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-STATE_DIR = Path(".codeminer_state")
+STATE_DIR = Path(".repominer_state")
 AUTH_FILE = STATE_DIR / "auth.json"
 
 
@@ -112,12 +112,16 @@ def verify_email_password(email: str, password: str) -> Optional[Dict[str, Any]]
     return user
 
 
-def upsert_email_password_user(email: str, password: str, name: Optional[str] = None) -> Dict[str, Any]:
+def upsert_email_password_user(
+    email: str, password: str, name: Optional[str] = None
+) -> Dict[str, Any]:
     normalized = _normalize_email(email)
     state = _load_state()
     users = state.get("users", [])
 
-    index = _find_user_index(state, lambda user: _normalize_email(user.get("email", "")) == normalized)
+    index = _find_user_index(
+        state, lambda user: _normalize_email(user.get("email", "")) == normalized
+    )
     salt, password_hash = _hash_password(password)
 
     if index >= 0:
@@ -169,7 +173,9 @@ def upsert_github_user(
     users = state.get("users", [])
     normalized_email = _normalize_email(email) if email else None
 
-    index = _find_user_index(state, lambda user: str(user.get("github_id")) == str(github_id))
+    index = _find_user_index(
+        state, lambda user: str(user.get("github_id")) == str(github_id)
+    )
     if index < 0 and normalized_email:
         index = _find_user_index(
             state,

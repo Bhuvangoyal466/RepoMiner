@@ -1,0 +1,160 @@
+Project Summary (concise)
+
+Name: RepoMiner
+Purpose: RAG-based repository chatbot + analytics: clone a GitHub repo, parse code (syntax-aware), embed chunks, store in ChromaDB, answer grounded questions via LLMs.
+Core components: ingestion pipeline (ingest.py), Streamlit UI (app.py, pages/*), backend API (backend_api.py), session persistence (repo_session_store.py), embeddings (all-MiniLM-L6-v2), vector DB (ChromaDB), LLM providers (Gemini/OpenRouter/Groq fallback).
+Key features to highlight: syntax-aware chunking (tree-sitter via LanguageParser), per-session vectorstores, conversational memory, repo analytics (files, top files, contributors, dependencies), exportable reports, optional multimodal image processing placeholder.
+Primary files to cite in slides: README.md, ingest.py, app.py, backend_api.py
+
+
+Gamma AI Prompt — Create a 10–12 slide PPT for my college viva
+
+Please use this exact brief to generate a polished 10–12 slide PowerPoint (PPTX). Audience: examiners and classmates; tone: professional, clear, concise; duration: ~8–12 minutes. Include speaker notes for each slide.
+
+Slide constraints:
+- 10–12 slides total (you may create 11 slides by default)
+- University / technical theme, readable fonts, accessible colors
+- Include speaker notes (short paragraphs) for each slide
+- Add one visually clear diagram (architecture) as a vector/mermaid or diagram image
+- Export output as PPTX with slide notes
+
+Slide-by-slide content (title → content bullets → visuals → speaker notes):
+
+1) Title Slide
+- Title: "RepoMiner — Repository Intelligence via RAG"
+- Subtitle: "College Project — Viva Presentation"
+- Student name, course, date, supervisor (placeholder fields)
+- Visual: project icon or simple code/repo graphic
+- Speaker notes: One-sentence project elevator pitch and what you'll cover.
+
+2) Problem & Motivation (Why this problem)
+- Bullets:
+  - Developers need fast, accurate answers about unfamiliar codebases.
+  - Generic LLM answers are often hallucinated and not traceable.
+  - Large repos are time-consuming to explore manually.
+- Visual: small infographic showing "Search code" vs "RAG + retriever"
+- Speaker notes: Explain limitations of manual exploration and ungrounded LLM responses.
+
+3) Project Overview
+- Bullets:
+  - Ingest any GitHub repo → parse code docs → create embeddings → enable a grounded chatbot + analytics.
+  - Built with Python, Streamlit, LangChain, ChromaDB, HuggingFace embeddings, Google Gemini/OpenRouter fallback.
+- Visual: 3–4 icon row (Clone, Parse, Embed, Chat)
+- Speaker notes: One-line summary of pipeline and tech stack.
+
+4) How It Works — High-level Flow
+- Bullets:
+  - Clone repository → Syntax-aware parsing (tree-sitter) → Chunking & embeddings → Store in ChromaDB → Retrieval + LLM answer.
+  - Retrieval returns source snippets cited in answers.
+- Visual: Flow diagram (left→right) showing stages (User question → vector search → context assembly → LLM)
+- Speaker notes: Walk through a single query lifecycle and emphasize grounding.
+
+5) Technical Architecture / Tech Stack
+- Bullets (two columns: component / technology):
+  - UI: Streamlit | Backend API: FastAPI / uvicorn
+  - Ingestion: GitPython + LangChain LanguageParser + RecursiveCharacterTextSplitter
+  - Embeddings: `all-MiniLM-L6-v2` (384-dim) | Vector DB: ChromaDB (SQLite + HNSW)
+  - LLM Providers: Google Gemini / OpenRouter / Groq (fallback chain)
+- Visual: Architecture diagram (boxes for frontend, backend, vector store, LLM provider). Use the mermaid diagram if available.
+- Speaker notes: Explain why each component was chosen (speed, local embedding, traceability).
+
+6) Key Features (what makes the project helpful)
+- Bullets:
+  - Syntax-aware chunking (keeps functions/classes intact)
+  - Per-session vectorstores and session persistence
+  - Grounded answers with file-level citations
+  - Repo analytics: top files, languages, contributors, dependencies
+  - Exportable reports (PDF/Markdown)
+- Visual: feature icons or small cards
+- Speaker notes: For each bullet, give 1 quick example of user value.
+
+7) Project Structure (code layout)
+- Bullets with file highlights:
+  - `app.py` — Streamlit entry and UI glue (app.py)
+  - `ingest.py` — cloning, parsing, embeddings, storing (ingest.py)
+  - `backend_api.py` — REST endpoints for sessions & chat (backend_api.py)
+  - `repo_session_store.py`, `ui.py`, `pages/*` — session persistence & UI pages
+  - `README.md` — usage and quick start (README.md)
+- Visual: a compact directory tree (copy from README "Project Structure")
+- Speaker notes: Mention where to look for key logic and how to navigate the repo.
+
+8) Implementation Phases / Timeline
+- Bullets (phases):
+  - Phase 1: Repo ingestion & syntax-aware chunking (parsing + embeddings)
+  - Phase 2: Vector store and retrieval + basic chat
+  - Phase 3: UI and session persistence + analytics
+  - Phase 4: Provider integration, performance tuning, exports
+- Visual: timeline or 4-step pipeline graphic
+- Speaker notes: Explain development order and testing approach.
+
+9) USP vs Generic LLMs and Existing Tools
+- Bullets:
+  - Grounding: Answers cite repository files (reduces hallucinations).
+  - Traceability: Each answer contains source paths & chunk excerpts.
+  - Efficiency: Local embeddings + HNSW (fast similarity search).
+  - Syntax awareness: chunking respects AST boundaries — better code answers than naive text splitters.
+  - Session isolation: per-user session vectorstores avoid contamination.
+- Visual: comparison table (left: Generic LLMs, right: RepoMiner) — highlight grounding, citations, source traceability, and repo-specific analytics.
+- Speaker notes: Provide 2–3 quick example contrasts vs GPT/Gemini alone (e.g., "GPT might invent function names; RepoMiner retrieves the exact function and shows the file path").
+
+10) Demo / Live Run (what you'll show in viva)
+- Bullets:
+  - Show `streamlit run app.py` and the Chatbot page
+  - Process a public GitHub repo (example command)
+  - Ask 2 demo questions and show source citations
+  - Open Repository Stats page to show analytics
+- Visual: UI screenshot placeholders (Chat & Stats)
+- Speaker notes: Step-by-step demo script: start server, process repo, ask a question about architecture, show sources.
+
+11) How to Get Started (setup steps)
+- Bullets (copy-short):
+  - Prereqs: Python 3.9+, Git
+  - Install: `python -m venv .venv` → `pip install -r requirements.txt`
+  - Configure: create `.env` with `GEMINI_API_KEY`, `OPENROUTER_API_KEY` (optional)
+  - Run: `streamlit run app.py`
+  - API demo: `POST /api/process` to process a repo, then chat via `/api/sessions/{id}/chat`
+- Visual: code block with commands
+- Speaker notes: Mention where to add API keys and the expected runtime url.
+
+12) Challenges, Future Work & Q&A
+- Bullets:
+  - Challenges: handling very large repos, private repo auth edge-cases, rate limits for LLMs
+  - Future: full multimodal vision integration, incremental ingestion, deployment in the cloud, user access controls
+  - Final slide: "Questions?"
+- Visual: list with simple icons; Q&A footer
+- Speaker notes: Prepare 2 possible viva questions and short answers (e.g., privacy, scale, evaluation metrics).
+
+Assets and visual suggestions for Gamma:
+- Use a clean academic/tech template (light background, legible sans-serif).
+- Use monospace formatting for code snippets, with max ~6–8 lines per snippet.
+- Include a generated architecture diagram — prefer Mermaid or a neat flowchart.
+- Include charts for repo stats: donut chart of languages, bar chart for top files (use example numbers if none).
+- Include two UI screenshots placeholders (Chat view, Stats view). If screenshots not available, render stylized mockups.
+- Use citations on slides that reference code: include short file path links, e.g., ingest.py:lines 1–80 and app.py top-level.
+- Add speaker notes as concise bullet paragraphs (2–4 sentences each).
+
+Precise instructions to Gamma:
+- Create exactly 11 slides (title + 9 content + Q&A) unless it must be 10–12; 11 is fine.
+- Put slide notes in the PPTX notes field.
+- Use accessible color contrast and font sizes suitable for projection.
+- Add slide transitions minimal; avoid animations that distract.
+- Export filename suggestion: "RepoMiner_Viva_Presentation.pptx"
+
+Optional extras for me (ask user before adding):
+- Add encoded architecture Mermaid exported as PNG
+- Add pre-filled demo repo URL to the Demo slide
+- Include speaker cue-timings (e.g., 45–60s per slide)
+
+References inside deck (for slides that reference code):
+- Use these files/locations as sources:
+  - README.md
+  - ingest.py
+  - app.py
+  - backend_api.py
+
+What I can do next:
+- Generate the PPTX content locally (bullet text + notes + images) and produce a PPTX file for you.
+- Or hand off this prompt directly to Gamma AI (copy-paste) — tell me which you prefer.
+
+If you choose A, I'll proceed to build the slides and attach the PPTX.
+If you choose B, I can provide the prompt formatted for direct paste into Gamma.

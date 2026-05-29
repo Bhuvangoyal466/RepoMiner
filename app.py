@@ -1,4 +1,4 @@
-"""CodeMiner home dashboard.
+"""RepoMiner home dashboard.
 
 This page keeps the app focused on the two core workflows: Chatbot and
 Repository Stats.
@@ -25,7 +25,7 @@ from ui import (
 )
 
 st.set_page_config(
-    page_title="CodeMiner",
+    page_title="RepoMiner",
     page_icon="⛏️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -66,7 +66,7 @@ if app_config.get("GROQ_API_KEY"):
     provider_bits.append("Groq")
 
 apply_base_ui()
-render_sidebar_brand("CodeMiner", "Repository intelligence workspace")
+render_sidebar_brand("RepoMiner", "Repository intelligence workspace")
 
 render_sidebar_panel("Navigate", "Jump directly to the two main workflows.")
 nav_left, nav_right = st.sidebar.columns(2)
@@ -103,7 +103,7 @@ else:
 
 render_hero(
     "Repository Intelligence",
-    "CodeMiner",
+    "RepoMiner",
     "Turn a GitHub repository into grounded answers and fast analytics. Start in Chatbot, then return here when you want the stats view or a saved session.",
 )
 
@@ -214,7 +214,7 @@ with summary_right:
 st.markdown(
     """
 <div style="text-align:center; color:var(--muted); padding:20px 0 6px; font-size:13px;">
-  CodeMiner keeps repository exploration organized, fast, and grounded in code context.
+    RepoMiner keeps repository exploration organized, fast, and grounded in code context.
 </div>
 """,
     unsafe_allow_html=True,

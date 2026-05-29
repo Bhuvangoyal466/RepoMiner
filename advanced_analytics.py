@@ -8,16 +8,30 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 DEFAULT_EXCLUDES = {
-    ".git", "node_modules", "dist", "build", ".next", ".venv", "venv",
-    "__pycache__", ".codeminer_state", ".repominer_state", ".streamlit",
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    ".next",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".repominer_state",
+    ".streamlit",
 }
 
 CODE_EXTS = {
-    ".py": "Python", ".js": "JavaScript", ".jsx": "JavaScript",
-    ".ts": "TypeScript", ".tsx": "TypeScript", ".java": "Java",
-    ".go": "Go", ".cpp": "C++", ".c": "C", ".cs": "C#",
+    ".py": "Python",
+    ".js": "JavaScript",
+    ".jsx": "JavaScript",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".java": "Java",
+    ".go": "Go",
+    ".cpp": "C++",
+    ".c": "C",
+    ".cs": "C#",
 }
 
 
@@ -49,7 +63,9 @@ def iter_repo_files(
     return files
 
 
-def compute_language_insights(repo_root: Path, max_files: int = 15000) -> Dict[str, Any]:
+def compute_language_insights(
+    repo_root: Path, max_files: int = 15000
+) -> Dict[str, Any]:
     """Return language-level insights based on file extensions."""
     files = iter_repo_files(repo_root, include_exts=None, max_files=max_files)
 
@@ -71,9 +87,15 @@ def compute_language_insights(repo_root: Path, max_files: int = 15000) -> Dict[s
 
     return {
         "total_files_scanned": len(files),
-        "extension_counts": dict(sorted(ext_counts.items(), key=lambda kv: kv[1], reverse=True)[:40]),
-        "language_counts": dict(sorted(language_counts.items(), key=lambda kv: kv[1], reverse=True)),
-        "top_directories": dict(sorted(dir_counts.items(), key=lambda kv: kv[1], reverse=True)[:20]),
+        "extension_counts": dict(
+            sorted(ext_counts.items(), key=lambda kv: kv[1], reverse=True)[:40]
+        ),
+        "language_counts": dict(
+            sorted(language_counts.items(), key=lambda kv: kv[1], reverse=True)
+        ),
+        "top_directories": dict(
+            sorted(dir_counts.items(), key=lambda kv: kv[1], reverse=True)[:20]
+        ),
     }
 
 

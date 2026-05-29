@@ -149,14 +149,14 @@ def render_hero(
 
 
 def render_sidebar_brand(
-    title: str = "CodeMiner", subtitle: str = "Repository intelligence workspace"
+    title: str = "RepoMiner", subtitle: str = "Repository intelligence workspace"
 ) -> None:
     """Render a compact branded sidebar header."""
 
     st.sidebar.markdown(
         f"""
 <div class="sidebar-brand">
-  <div class="sidebar-brand-kicker">CodeMiner</div>
+  <div class="sidebar-brand-kicker">RepoMiner</div>
   <div class="sidebar-brand-title">{_safe_html(title)}</div>
   <div class="sidebar-brand-copy">{_safe_html(subtitle)}</div>
 </div>

@@ -21,7 +21,7 @@ export default function Home(){
               <span className="h-1.5 w-1.5 rounded-full bg-accent-2" />
               Live workspace
             </div>
-            <h1 className="mt-4 text-3xl font-bold">CodeMiner</h1>
+            <h1 className="mt-4 text-3xl font-bold">RepoMiner</h1>
             <p className="text-muted mt-2 max-w-xl">Instant codebase intelligence for repositories, sessions, and follow-up analysis. Paste a GitHub URL to get started.</p>
             <div className="mt-5 flex flex-wrap gap-2">
               <a href="/repo" className="px-4 py-2 rounded-lg border border-accent/35 bg-gradient-to-r from-accent to-accent-2 text-white shadow-soft-lg">Process a repository</a>

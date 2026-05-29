@@ -40,7 +40,7 @@ export default function Login({ onLogin }: LoginProps) {
             <Sparkles size={14} />
             Email and password sign-in
           </div>
-          <h1 className="mt-6 text-4xl font-bold text-white">Sign in to CodeMiner</h1>
+          <h1 className="mt-6 text-4xl font-bold text-white">Sign in to RepoMiner</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">
             Sign in to process repositories and manage sessions. Use the same account to keep your analysis history organized.
           </p>

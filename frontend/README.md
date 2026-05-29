@@ -1,10 +1,10 @@
-# CodeMiner Frontend
+# RepoMiner Frontend
 
-This is a Vite + React + TypeScript frontend for the CodeMiner project. It provides a modern workspace UI for repository ingestion, chat, and analytics.
+This is a Vite + React + TypeScript frontend for the RepoMiner project. It provides a modern workspace UI for repository ingestion, chat, and analytics.
 
 Quick start
 ```bash
-cd "CodeMiner/frontend"
+cd "repominer/frontend"
 npm install
 npm run dev
 ```

@@ -42,7 +42,7 @@ env/
 cloned_repo/
 chroma_db/
 scan_cache/
-.codeminer_state/
+.repominer_state/
 .rabbitai_state/
 
 # Frontend build artifacts

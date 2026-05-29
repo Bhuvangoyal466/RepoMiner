@@ -82,7 +82,7 @@ export default function Dashboard() {
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = `codeminer_stats.${format}`
+      anchor.download = `repominer_stats.${format}`
       anchor.click()
       URL.revokeObjectURL(url)
     } catch {

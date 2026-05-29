@@ -16,7 +16,7 @@ KEY TECHNICAL DECISIONS:
 - ChromaDB: Uses HNSW indexing for fast approximate nearest-neighbor search
 - Metadata tracking: Stores file paths, languages, chunk IDs for traceability
 
-Author: CodeMiner
+Author: RepoMiner
 Date: March 2026
 """
 
@@ -71,16 +71,18 @@ CODE_EXTENSIONS = {
 # Add common C/C++ extensions so the GenericLoader will include them
 # Values map to a human-readable marker (parser auto-detection is used),
 # using simple strings/None to avoid depending on Language.CPP availability.
-CODE_EXTENSIONS.update({
-    ".c": "C",
-    ".h": "C",
-    ".cpp": "C++",
-    ".hpp": "C++",
-    ".cc": "C++",
-    ".cxx": "C++",
-    ".hh": "C++",
-    ".hxx": "C++",
-})
+CODE_EXTENSIONS.update(
+    {
+        ".c": "C",
+        ".h": "C",
+        ".cpp": "C++",
+        ".hpp": "C++",
+        ".cc": "C++",
+        ".cxx": "C++",
+        ".hh": "C++",
+        ".hxx": "C++",
+    }
+)
 
 # Image extensions for multimodal processing
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg"}
@@ -288,8 +290,7 @@ def _compute_contributors(repo_dir: str, limit: int = 10) -> List[Dict]:
         counts[name] += 1
 
     return [
-        {"name": name, "commits": count}
-        for name, count in counts.most_common(limit)
+        {"name": name, "commits": count} for name, count in counts.most_common(limit)
     ]
 
 
@@ -333,7 +334,9 @@ def _compute_dependencies(repo_dir: str) -> List[Dict]:
         if not req_path.is_file():
             continue
         try:
-            for raw_line in req_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            for raw_line in req_path.read_text(
+                encoding="utf-8", errors="ignore"
+            ).splitlines():
                 line = raw_line.strip()
                 if not line or line.startswith("#") or line.startswith("-"):
                     continue
@@ -359,7 +362,9 @@ def _compute_dependencies(repo_dir: str) -> List[Dict]:
 # ==============================================================================
 
 
-def process_repository(github_url: str, persist_dir: str | None = None) -> Tuple[bool, Dict]:
+def process_repository(
+    github_url: str, persist_dir: str | None = None
+) -> Tuple[bool, Dict]:
     """
     Complete end-to-end repository ingestion pipeline.
 
@@ -607,7 +612,9 @@ def process_repository(github_url: str, persist_dir: str | None = None) -> Tuple
         try:
             language_insights = compute_language_insights(repo_root)
             stats["language_insights"] = language_insights
-            stats["language_insights_summary"] = summarize_language_insights(language_insights)
+            stats["language_insights_summary"] = summarize_language_insights(
+                language_insights
+            )
         except Exception:
             stats["language_insights"] = {}
             stats["language_insights_summary"] = {}

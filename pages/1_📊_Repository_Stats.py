@@ -27,6 +27,7 @@ from ui import (
     render_empty_state,
 )
 
+
 def _rows_from_stats(stats: dict, key: str) -> list[dict]:
     rows = (stats.get(key) or []) if isinstance(stats, dict) else []
     return [row for row in rows if isinstance(row, dict)]
@@ -34,15 +35,15 @@ def _rows_from_stats(stats: dict, key: str) -> list[dict]:
 
 # Page Configuration
 st.set_page_config(
-    page_title="CodeMiner Repository Stats", page_icon="📊", layout="wide"
+    page_title="RepoMiner Repository Stats", page_icon="📊", layout="wide"
 )
 
 apply_base_ui()
-render_sidebar_brand("CodeMiner", "Repository intelligence workspace")
+render_sidebar_brand("RepoMiner", "Repository intelligence workspace")
 
 render_hero(
     "Repository Stats",
-    "CodeMiner analytics",
+    "RepoMiner analytics",
     "A compact view of the processed repository with metrics, stacks, exports, and deeper signals.",
 )
 
@@ -497,7 +498,9 @@ elif st.session_state.get("repo_stats"):
                 use_container_width=True,
             )
         else:
-            st.button("Summary PDF unavailable", disabled=True, use_container_width=True)
+            st.button(
+                "Summary PDF unavailable", disabled=True, use_container_width=True
+            )
     with report_cols[2]:
         st.download_button(
             "⬇️ Onboarding Markdown",

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import streamlit as st
 
-STATE_DIR = Path(".codeminer_state")
+STATE_DIR = Path(".repominer_state")
 SESSIONS_DIR = STATE_DIR / "sessions"
 VECTORSTORE_DIR = STATE_DIR / "vectorstores"
 INDEX_FILE = STATE_DIR / "index.json"
@@ -44,7 +44,7 @@ def _vectorstore_path(session_id: str) -> Path:
 def session_vectorstore_dir(session_id: str) -> str:
     """Return the per-session ChromaDB persist directory as a string path.
 
-    Each session has its own directory under `.codeminer_state/vectorstores/<session_id>/`.
+    Each session has its own directory under `.repominer_state/vectorstores/<session_id>/`.
     Routes that read or write the vectorstore should pass this to Chroma directly
     instead of staging through the shared `./chroma_db` directory.
     """
@@ -156,7 +156,9 @@ def restore_vectorstore_snapshot(
     return True
 
 
-def load_session(session_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def load_session(
+    session_id: str, user_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     path = _session_path(session_id)
     if not path.exists():
         return None
@@ -173,7 +175,11 @@ def list_tracked_repositories(user_id: Optional[str] = None) -> List[Dict[str, A
     sessions = list_sessions(user_id=user_id)
     repos: Dict[str, Dict[str, Any]] = {}
     for session in sessions:
-        repo_key = session.get("repo_url") or session.get("repo_name") or session.get("session_id")
+        repo_key = (
+            session.get("repo_url")
+            or session.get("repo_name")
+            or session.get("session_id")
+        )
         if not repo_key:
             continue
         current = repos.get(repo_key)
@@ -185,13 +191,17 @@ def list_tracked_repositories(user_id: Optional[str] = None) -> List[Dict[str, A
         }
         if current:
             current["sessionCount"] = int(current.get("sessionCount", 1)) + 1
-            if candidate.get("lastUpdatedAt") and candidate.get("lastUpdatedAt") > current.get("lastUpdatedAt", ""):
+            if candidate.get("lastUpdatedAt") and candidate.get(
+                "lastUpdatedAt"
+            ) > current.get("lastUpdatedAt", ""):
                 current["lastUpdatedAt"] = candidate["lastUpdatedAt"]
             if candidate.get("repoName") and not current.get("repoName"):
                 current["repoName"] = candidate["repoName"]
         else:
             repos[repo_key] = candidate
-    return sorted(repos.values(), key=lambda repo: repo.get("lastUpdatedAt") or "", reverse=True)
+    return sorted(
+        repos.values(), key=lambda repo: repo.get("lastUpdatedAt") or "", reverse=True
+    )
 
 
 def delete_session(session_id: str, user_id: Optional[str] = None) -> None:
